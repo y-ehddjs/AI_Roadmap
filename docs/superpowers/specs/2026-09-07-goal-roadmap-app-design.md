@@ -80,7 +80,8 @@
   (로드맵 무관, 계정 전체 통합 스트릭)
 - **coaching_messages**: id, user_id(FK), roadmap_id(FK),
   trigger_type(`delay`), message, created_at, read_at
-- **notification_settings**: id, user_id(FK), reminder_enabled, reminder_time
+- **notification_settings**: id, user_id(FK), reminder_enabled, reminder_time,
+  push_token (Expo Push 토큰. 코칭/리마인더 발송에 필요해 계획 단계에서 추가)
 
 ## 에러 처리 / 엣지 케이스
 

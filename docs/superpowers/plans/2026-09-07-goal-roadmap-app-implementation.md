@@ -1,27 +1,29 @@
-# 목표 로드맵 앱 Implementation Plan
+# 목표 로드맵 앱 Implementation Plan (반응형 웹)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 여러 목표(로드맵)를 세우고, 마일스톤을 타임라인으로 관리하며, AI가 로드맵을
-제안하고 지연 시 자동으로 코칭 메시지를 보내는 모바일 앱의 MVP를 만든다.
+제안하고 지연 시 자동으로 코칭 메시지를 보내는 반응형 웹 앱의 MVP를 만든다.
 
-**Architecture:** Expo(React Native) 클라이언트가 Supabase(Postgres + Auth)에 직접
+**Architecture:** Next.js(App Router) 클라이언트가 Supabase(Postgres + Auth)에 직접
 CRUD 쿼리를 날리고, AI가 필요한 두 지점(로드맵 생성, 지연 코칭)은 Supabase Edge
 Function이 서버 사이드에서 Claude API를 호출해 API 키를 클라이언트에 노출하지 않는다.
-알림은 Expo Push Notification Service로 발송한다.
+알림은 서비스 워커 기반 Web Push API로 발송한다. 화면은 Tailwind CSS의 반응형
+브레이크포인트로 모바일/데스크톱 브라우저 모두를 지원한다.
 
-**Tech Stack:** Expo (React Native + TypeScript) + Expo Router, @supabase/supabase-js,
-Supabase Postgres/Auth/Edge Functions(Deno), Anthropic Claude API, expo-notifications,
-Jest(jest-expo preset, 앱 코드), Deno test runner(엣지 함수 코드).
+**Tech Stack:** Next.js(React + TypeScript, App Router) + Tailwind CSS,
+@supabase/supabase-js, Supabase Edge Functions(Deno) + Anthropic Claude API,
+Web Push API(서비스 워커, `web-push` 라이브러리), Jest(next/jest preset, 앱 코드),
+Deno test runner(엣지 함수 코드).
 
 **Spec:** `docs/superpowers/specs/2026-09-07-goal-roadmap-app-design.md`
 
 ## Global Constraints
 
-- 플랫폼: Expo(React Native), iOS/Android 동시 지원
+- 플랫폼: 반응형 웹 (Next.js) — 별도 앱스토어 배포 없음, 브라우저로 접근
 - 백엔드: Supabase (Postgres + Auth + Realtime); Edge Function은 Deno 런타임에서 동작
 - 인증: 이메일/비밀번호만 (소셜 로그인 없음)
-- 알림: Expo Push Notification Service
+- 알림: Web Push API (서비스 워커 + VAPID 키)
 - AI: Claude API — 로드맵 생성 + 프로액티브 코칭. 코칭 트리거는 마감일 경과(`delay`)
   하나만 구현하며 "정체" 판정은 범위 밖(YAGNI)
 - 마일스톤은 고정 마감일(달력형)이며, 한 사용자가 여러 로드맵을 동시에 진행 가능
@@ -34,34 +36,41 @@ Jest(jest-expo preset, 앱 코드), Deno test runner(엣지 함수 코드).
 ## File Structure
 
 ```
-app.config.ts                          # Expo 설정 (env → extra)
+next.config.js
+tailwind.config.ts
+jest.config.js
+public/
+  sw.js                              # Web Push 서비스 워커
 app/
+  layout.tsx                         # 루트 레이아웃 + globals.css import
+  globals.css                        # Tailwind 지시문
   (auth)/
-    login.tsx                          # 로그인
-    signup.tsx                         # 회원가입
-  (tabs)/
-    index.tsx                          # 홈 - 로드맵 리스트 + 스트릭
-    dashboard.tsx                      # 진행률 대시보드
-    coaching.tsx                       # AI 코칭 메시지함
-    settings.tsx                       # 설정
+    login/page.tsx                   # 로그인
+    signup/page.tsx                  # 회원가입
+  (dashboard)/
+    layout.tsx                       # 공통 네비게이션(홈/대시보드/코칭/설정)
+    page.tsx                         # 홈 - 로드맵 리스트 + 스트릭
+    dashboard/page.tsx               # 진행률 대시보드
+    coaching/page.tsx                # AI 코칭 메시지함
+    settings/page.tsx                # 설정
   roadmap/
-    create.tsx                        # 로드맵 생성 (수동 입력 + AI 플로우)
-    [id].tsx                          # 로드맵 상세 (타임라인)
+    create/page.tsx                  # 로드맵 생성 (수동 입력 + AI 플로우)
+    [id]/page.tsx                    # 로드맵 상세 (타임라인, 반응형)
   milestone/
-    [id].tsx                          # 마일스톤 상세
+    [id]/page.tsx                    # 마일스톤 상세
 lib/
-  config.ts                           # getSupabaseConfig (순수 함수)
-  supabase.ts                         # Supabase 클라이언트 인스턴스
-  auth.ts                             # validateEmail/validatePassword
-  progress.ts                         # calculateProgress/milestoneStatus (순수 함수)
-  roadmaps.ts                         # 로드맵 CRUD
-  milestones.ts                       # 마일스톤 CRUD
-  timeline.ts                         # computeNodePositions (순수 함수)
-  streak.ts                           # computeStreak (순수 함수)
-  checkins.ts                         # recordCheckin/getTodayStreak
-  notifications.ts                   # nextReminderDate + 푸시 등록
-  dashboard.ts                        # summarizeDashboard (순수 함수)
-  coaching.ts                         # listMessages/markRead
+  config.ts                          # getSupabaseConfig (순수 함수)
+  supabase.ts                        # Supabase 브라우저 클라이언트
+  auth.ts                            # validateEmail/validatePassword
+  progress.ts                        # calculateProgress/milestoneStatus (순수 함수)
+  roadmaps.ts                        # 로드맵 CRUD
+  milestones.ts                      # 마일스톤 CRUD
+  timeline.ts                        # computeNodePositions (순수 함수, % 좌표)
+  streak.ts                          # computeStreak (순수 함수)
+  checkins.ts                        # recordCheckin/getTodayStreak
+  notifications.ts                   # subscribeToPush + urlBase64ToUint8Array
+  dashboard.ts                       # summarizeDashboard (순수 함수)
+  coaching.ts                        # listMessages/markRead
 types/
   models.ts                          # 전체 테이블 타입
 test-utils/
@@ -79,50 +88,59 @@ __tests__/
   coaching.test.ts
 supabase/
   migrations/
-    0001_init.sql                     # 전체 스키마 + RLS
+    0001_init.sql                    # 전체 스키마 + RLS
   functions/
     generate-roadmap/
       index.ts                       # AI 로드맵 생성 엣지 함수
       parse.ts                       # parseRoadmapResponse (순수 함수)
       parse.test.ts                  # Deno test
     check-coaching/
-      index.ts                       # 지연 감지 + 코칭 발송 엣지 함수 (스케줄)
+      index.ts                       # 지연 감지 + 코칭 Web Push 발송 (스케줄)
       select.ts                      # selectOverdueMilestones/buildCoachingPrompt
       select.test.ts                 # Deno test
+    send-reminders/
+      index.ts                       # 리마인더 Web Push 발송 (스케줄)
+      schedule.ts                    # isReminderDue (순수 함수)
+      schedule.test.ts               # Deno test
 ```
 
 ---
 
-### Task 1: Expo 프로젝트 셋업 + Supabase 클라이언트 설정
+### Task 1: Next.js 프로젝트 셋업 + Tailwind + Supabase 클라이언트 설정
 
 **Files:**
-- Create: `app.config.ts`
 - Create: `lib/config.ts`
 - Create: `lib/supabase.ts`
 - Create: `jest.config.js`
+- Create: `app/layout.tsx`
+- Create: `app/globals.css`
 - Test: `__tests__/config.test.ts`
 
 **Interfaces:**
-- Produces: `getSupabaseConfig(extra: Record<string, unknown> | undefined): { url: string; anonKey: string }`,
-  `supabase: SupabaseClient` (default export via named `supabase` in `lib/supabase.ts`)
+- Produces: `getSupabaseConfig(env: Record<string, string | undefined>): { url: string; anonKey: string }`,
+  `supabase: SupabaseClient`
 
-- [ ] **Step 1: Expo 프로젝트를 생성하고 의존성을 설치한다**
+- [ ] **Step 1: Next.js 프로젝트를 생성하고 의존성을 설치한다**
 
 ```bash
-npx create-expo-app@latest . --template blank-typescript
-npx expo install expo-router expo-constants expo-notifications expo-device
-npm install @supabase/supabase-js dotenv
-npm install --save-dev jest jest-expo @types/jest
+npx create-next-app@latest . --typescript --tailwind --app --import-alias "@/*"
+npm install @supabase/supabase-js
+npm install --save-dev jest jest-environment-jsdom @testing-library/react @testing-library/jest-dom
 ```
 
 - [ ] **Step 2: Jest 설정 파일을 작성한다**
 
 ```js
 // jest.config.js
-module.exports = {
-  preset: 'jest-expo',
+const nextJest = require('next/jest');
+const createJestConfig = nextJest({ dir: './' });
+
+const customJestConfig = {
+  testEnvironment: 'jsdom',
   testPathIgnorePatterns: ['/node_modules/', '/supabase/functions/'],
 };
+
+module.exports = createJestConfig(customJestConfig);
 ```
 
 `package.json`의 `scripts`에 추가:
@@ -139,24 +157,20 @@ module.exports = {
 import { getSupabaseConfig } from '../lib/config';
 
 test('returns url and anonKey when both are present', () => {
-  const result = getSupabaseConfig({ supabaseUrl: 'https://x.supabase.co', supabaseAnonKey: 'anon-key' });
+  const result = getSupabaseConfig({ NEXT_PUBLIC_SUPABASE_URL: 'https://x.supabase.co', NEXT_PUBLIC_SUPABASE_ANON_KEY: 'anon-key' });
   expect(result).toEqual({ url: 'https://x.supabase.co', anonKey: 'anon-key' });
 });
 
-test('throws when supabaseUrl is missing', () => {
-  expect(() => getSupabaseConfig({ supabaseAnonKey: 'anon-key' })).toThrow('supabaseUrl');
+test('throws when NEXT_PUBLIC_SUPABASE_URL is missing', () => {
+  expect(() => getSupabaseConfig({ NEXT_PUBLIC_SUPABASE_ANON_KEY: 'anon-key' })).toThrow('NEXT_PUBLIC_SUPABASE_URL');
 });
 
-test('throws when supabaseAnonKey is missing', () => {
-  expect(() => getSupabaseConfig({ supabaseUrl: 'https://x.supabase.co' })).toThrow('supabaseAnonKey');
-});
-
-test('throws when extra is undefined', () => {
-  expect(() => getSupabaseConfig(undefined)).toThrow('supabaseUrl');
+test('throws when NEXT_PUBLIC_SUPABASE_ANON_KEY is missing', () => {
+  expect(() => getSupabaseConfig({ NEXT_PUBLIC_SUPABASE_URL: 'https://x.supabase.co' })).toThrow('NEXT_PUBLIC_SUPABASE_ANON_KEY');
 });
 ```
 
-- [ ] **Step 4: 테스트를 실행해 실패를 확인한다**
+- [ ] **Step 4: 테스트 실행 → 실패 확인**
 
 Run: `npx jest config.test.ts`
 Expected: FAIL with "Cannot find module '../lib/config'"
@@ -170,14 +184,14 @@ export interface SupabaseConfig {
   anonKey: string;
 }
 
-export function getSupabaseConfig(extra: Record<string, unknown> | undefined): SupabaseConfig {
-  const url = extra?.supabaseUrl;
-  const anonKey = extra?.supabaseAnonKey;
+export function getSupabaseConfig(env: Record<string, string | undefined>): SupabaseConfig {
+  const url = env.NEXT_PUBLIC_SUPABASE_URL;
+  const anonKey = env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (typeof url !== 'string' || url.length === 0) {
-    throw new Error('Missing EXPO_PUBLIC supabaseUrl in app config extra');
+    throw new Error('Missing NEXT_PUBLIC_SUPABASE_URL');
   }
   if (typeof anonKey !== 'string' || anonKey.length === 0) {
-    throw new Error('Missing EXPO_PUBLIC supabaseAnonKey in app config extra');
+    throw new Error('Missing NEXT_PUBLIC_SUPABASE_ANON_KEY');
   }
   return { url, anonKey };
 }
@@ -185,49 +199,50 @@ export function getSupabaseConfig(extra: Record<string, unknown> | undefined): S
 
 ```ts
 // lib/supabase.ts
+'use client';
 import { createClient } from '@supabase/supabase-js';
-import Constants from 'expo-constants';
 import { getSupabaseConfig } from './config';
 
-const { url, anonKey } = getSupabaseConfig(Constants.expoConfig?.extra as Record<string, unknown> | undefined);
+const { url, anonKey } = getSupabaseConfig(process.env as Record<string, string | undefined>);
 
 export const supabase = createClient(url, anonKey);
 ```
 
-```ts
-// app.config.ts
-import 'dotenv/config';
-import type { ExpoConfig } from 'expo/config';
+```tsx
+// app/layout.tsx
+import './globals.css';
+import type { ReactNode } from 'react';
 
-const config: ExpoConfig = {
-  name: 'goal-roadmap',
-  slug: 'goal-roadmap',
-  scheme: 'goalroadmap',
-  ios: { supportsTablet: true },
-  android: {},
-  extra: {
-    supabaseUrl: process.env.EXPO_PUBLIC_SUPABASE_URL,
-    supabaseAnonKey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY,
-  },
-};
-
-export default config;
+export default function RootLayout({ children }: { children: ReactNode }) {
+  return (
+    <html lang="ko">
+      <body>{children}</body>
+    </html>
+  );
+}
 ```
 
-- [ ] **Step 6: 테스트를 실행해 통과를 확인한다**
+```css
+/* app/globals.css */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+```
+
+- [ ] **Step 6: 테스트 실행 → 통과 확인**
 
 Run: `npx jest config.test.ts`
-Expected: PASS (4 tests)
+Expected: PASS (3 tests)
 
-- [ ] **Step 7: `.env`에 실제 Supabase 프로젝트 값을 넣고 앱이 뜨는지 수동 확인한다**
+- [ ] **Step 7: `.env.local`에 실제 Supabase 프로젝트 값을 넣고 앱이 뜨는지 수동 확인한다**
 
-Run: `npx expo start` → 시뮬레이터/Expo Go에서 앱이 크래시 없이 뜨는지 확인
+Run: `npm run dev` → `http://localhost:3000` 접속 시 에러 없이 렌더링되는지 확인
 
 - [ ] **Step 8: 커밋**
 
 ```bash
-git add app.config.ts lib/config.ts lib/supabase.ts jest.config.js __tests__/config.test.ts package.json
-git commit -m "chore: bootstrap Expo project with Supabase client"
+git add lib/config.ts lib/supabase.ts jest.config.js app/layout.tsx app/globals.css __tests__/config.test.ts package.json
+git commit -m "chore: bootstrap Next.js project with Supabase client"
 ```
 
 ---
@@ -241,8 +256,8 @@ git commit -m "chore: bootstrap Expo project with Supabase client"
 **Interfaces:**
 - Produces: 테이블 `roadmaps`, `milestones`, `habit_checkins`, `coaching_messages`,
   `notification_settings` (RLS 적용). TS 타입 `Roadmap`, `Milestone`, `HabitCheckin`,
-  `CoachingMessage`, `NotificationSettings`, `RoadmapSource`, `RoadmapStatus`,
-  `MilestoneStatus`.
+  `CoachingMessage`, `NotificationSettings`, `PushSubscriptionData`, `RoadmapSource`,
+  `RoadmapStatus`, `MilestoneStatus`.
 
 - [ ] **Step 1: 마이그레이션 SQL을 작성한다**
 
@@ -292,7 +307,7 @@ create table if not exists public.notification_settings (
   user_id uuid not null unique references auth.users(id) on delete cascade,
   reminder_enabled boolean not null default true,
   reminder_time time not null default '09:00',
-  push_token text
+  push_subscription jsonb
 );
 
 alter table public.roadmaps enable row level security;
@@ -377,12 +392,17 @@ export interface CoachingMessage {
   read_at: string | null;
 }
 
+export interface PushSubscriptionData {
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+}
+
 export interface NotificationSettings {
   id: string;
   user_id: string;
   reminder_enabled: boolean;
   reminder_time: string;
-  push_token: string | null;
+  push_subscription: PushSubscriptionData | null;
 }
 ```
 
@@ -399,8 +419,8 @@ git commit -m "feat: add database schema with RLS and matching TS types"
 
 **Files:**
 - Create: `lib/auth.ts`
-- Create: `app/(auth)/login.tsx`
-- Create: `app/(auth)/signup.tsx`
+- Create: `app/(auth)/login/page.tsx`
+- Create: `app/(auth)/signup/page.tsx`
 - Test: `__tests__/auth.test.ts`
 
 **Interfaces:**
@@ -453,17 +473,18 @@ export function validatePassword(password: string): boolean {
 Run: `npx jest auth.test.ts`
 Expected: PASS (4 tests)
 
-- [ ] **Step 5: 로그인/회원가입 화면을 만든다**
+- [ ] **Step 5: 로그인/회원가입 페이지를 만든다**
 
 ```tsx
-// app/(auth)/login.tsx
+// app/(auth)/login/page.tsx
+'use client';
 import { useState } from 'react';
-import { View, TextInput, Button, Text } from 'react-native';
-import { router } from 'expo-router';
-import { supabase } from '../../lib/supabase';
-import { validateEmail, validatePassword } from '../../lib/auth';
+import { useRouter } from 'next/navigation';
+import { supabase } from '../../../lib/supabase';
+import { validateEmail, validatePassword } from '../../../lib/auth';
 
-export default function LoginScreen() {
+export default function LoginPage() {
+  const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -478,31 +499,42 @@ export default function LoginScreen() {
       setError(signInError.message);
       return;
     }
-    router.replace('/(tabs)');
+    router.replace('/');
   }
 
   return (
-    <View style={{ flex: 1, justifyContent: 'center', padding: 24, gap: 12 }}>
-      <Text>로그인</Text>
-      <TextInput placeholder="이메일" value={email} onChangeText={setEmail} autoCapitalize="none" />
-      <TextInput placeholder="비밀번호" value={password} onChangeText={setPassword} secureTextEntry />
-      {error && <Text style={{ color: 'red' }}>{error}</Text>}
-      <Button title="로그인" onPress={handleLogin} />
-      <Button title="회원가입" onPress={() => router.push('/(auth)/signup')} />
-    </View>
+    <div className="mx-auto flex min-h-screen max-w-sm flex-col justify-center gap-3 p-6">
+      <h1 className="text-xl font-bold">로그인</h1>
+      <input className="rounded-lg border p-3" placeholder="이메일" value={email} onChange={(e) => setEmail(e.target.value)} />
+      <input
+        className="rounded-lg border p-3"
+        placeholder="비밀번호"
+        type="password"
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+      />
+      {error && <p className="text-sm text-red-600">{error}</p>}
+      <button className="rounded-lg bg-orange-500 p-3 font-semibold text-white" onClick={handleLogin}>
+        로그인
+      </button>
+      <button className="text-sm text-gray-500 underline" onClick={() => router.push('/signup')}>
+        회원가입
+      </button>
+    </div>
   );
 }
 ```
 
 ```tsx
-// app/(auth)/signup.tsx
+// app/(auth)/signup/page.tsx
+'use client';
 import { useState } from 'react';
-import { View, TextInput, Button, Text } from 'react-native';
-import { router } from 'expo-router';
-import { supabase } from '../../lib/supabase';
-import { validateEmail, validatePassword } from '../../lib/auth';
+import { useRouter } from 'next/navigation';
+import { supabase } from '../../../lib/supabase';
+import { validateEmail, validatePassword } from '../../../lib/auth';
 
-export default function SignupScreen() {
+export default function SignupPage() {
+  const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -517,30 +549,40 @@ export default function SignupScreen() {
       setError(signUpError.message);
       return;
     }
-    router.replace('/(tabs)');
+    router.replace('/');
   }
 
   return (
-    <View style={{ flex: 1, justifyContent: 'center', padding: 24, gap: 12 }}>
-      <Text>회원가입</Text>
-      <TextInput placeholder="이메일" value={email} onChangeText={setEmail} autoCapitalize="none" />
-      <TextInput placeholder="비밀번호 (8자 이상)" value={password} onChangeText={setPassword} secureTextEntry />
-      {error && <Text style={{ color: 'red' }}>{error}</Text>}
-      <Button title="가입하기" onPress={handleSignup} />
-    </View>
+    <div className="mx-auto flex min-h-screen max-w-sm flex-col justify-center gap-3 p-6">
+      <h1 className="text-xl font-bold">회원가입</h1>
+      <input className="rounded-lg border p-3" placeholder="이메일" value={email} onChange={(e) => setEmail(e.target.value)} />
+      <input
+        className="rounded-lg border p-3"
+        placeholder="비밀번호 (8자 이상)"
+        type="password"
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+      />
+      {error && <p className="text-sm text-red-600">{error}</p>}
+      <button className="rounded-lg bg-orange-500 p-3 font-semibold text-white" onClick={handleSignup}>
+        가입하기
+      </button>
+    </div>
   );
 }
 ```
 
 - [ ] **Step 6: 수동 확인**
 
-Run: `npx expo start` → 회원가입 후 Supabase Studio의 `auth.users` 테이블에 행이 생기는지, 로그인 성공 시 `(tabs)`로 이동하는지 확인
+Run: `npm run dev` → 회원가입 후 Supabase Studio의 `auth.users` 테이블에 행이 생기는지,
+로그인 성공 시 홈(`/`)으로 이동하는지, 좁은 화면(모바일 폭)에서도 폼이 중앙 정렬로
+잘 보이는지 확인
 
 - [ ] **Step 7: 커밋**
 
 ```bash
 git add lib/auth.ts app/\(auth\) __tests__/auth.test.ts
-git commit -m "feat: add email/password auth screens"
+git commit -m "feat: add email/password auth pages"
 ```
 
 ---
@@ -893,21 +935,44 @@ git commit -m "feat: add milestone CRUD"
 
 ---
 
-### Task 7: 홈 화면 — 로드맵 리스트
+### Task 7: 홈 페이지 — 로드맵 리스트 (반응형 그리드)
 
 **Files:**
-- Create: `app/(tabs)/index.tsx`
+- Create: `app/(dashboard)/page.tsx`
+- Create: `app/(dashboard)/layout.tsx`
 
 **Interfaces:**
 - Consumes: `listRoadmaps` (Task 5), `listMilestones` (Task 6), `calculateProgress`, `milestoneStatus` (Task 4), `supabase` (Task 1)
 
-- [ ] **Step 1: 화면을 구현한다**
+- [ ] **Step 1: 공통 네비게이션 레이아웃을 만든다**
 
 ```tsx
-// app/(tabs)/index.tsx
+// app/(dashboard)/layout.tsx
+import Link from 'next/link';
+import type { ReactNode } from 'react';
+
+export default function DashboardLayout({ children }: { children: ReactNode }) {
+  return (
+    <div>
+      <nav className="flex gap-4 border-b p-4 text-sm">
+        <Link href="/">홈</Link>
+        <Link href="/dashboard">대시보드</Link>
+        <Link href="/coaching">AI 코칭</Link>
+        <Link href="/settings">설정</Link>
+      </nav>
+      {children}
+    </div>
+  );
+}
+```
+
+- [ ] **Step 2: 홈 페이지를 구현한다**
+
+```tsx
+// app/(dashboard)/page.tsx
+'use client';
 import { useEffect, useState } from 'react';
-import { View, Text, FlatList, Button } from 'react-native';
-import { router } from 'expo-router';
+import Link from 'next/link';
 import { supabase } from '../../lib/supabase';
 import { listRoadmaps } from '../../lib/roadmaps';
 import { listMilestones } from '../../lib/milestones';
@@ -921,7 +986,7 @@ interface RoadmapRow {
   nextIsOverdue: boolean;
 }
 
-export default function HomeScreen() {
+export default function HomePage() {
   const [rows, setRows] = useState<RoadmapRow[]>([]);
 
   useEffect(() => {
@@ -952,48 +1017,55 @@ export default function HomeScreen() {
   }, []);
 
   return (
-    <View style={{ flex: 1, padding: 24, gap: 16 }}>
-      <Text style={{ fontSize: 22, fontWeight: '700' }}>내 목표</Text>
-      <FlatList
-        data={rows}
-        keyExtractor={(item) => item.roadmap.id}
-        renderItem={({ item }) => (
-          <View style={{ borderWidth: 1, borderRadius: 16, padding: 16, marginBottom: 12 }}>
-            <Text style={{ fontWeight: '600' }}>{item.roadmap.title}</Text>
-            <Text>{item.progress.percent}% 완료 ({item.progress.completedCount}/{item.progress.totalCount})</Text>
-            {item.nextMilestone && (
-              <Text style={{ color: item.nextIsOverdue ? 'red' : '#666' }}>
-                다음: {item.nextMilestone.title} · {item.nextMilestone.due_date}
-              </Text>
+    <div className="mx-auto max-w-3xl p-6">
+      <h1 className="mb-4 text-2xl font-bold">내 목표</h1>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        {rows.map((row) => (
+          <div key={row.roadmap.id} className="rounded-2xl border p-4">
+            <h2 className="font-semibold">{row.roadmap.title}</h2>
+            <p className="text-sm text-gray-600">
+              {row.progress.percent}% 완료 ({row.progress.completedCount}/{row.progress.totalCount})
+            </p>
+            {row.nextMilestone && (
+              <p className={`text-sm ${row.nextIsOverdue ? 'text-red-600' : 'text-gray-500'}`}>
+                다음: {row.nextMilestone.title} · {row.nextMilestone.due_date}
+              </p>
             )}
-            <Button title="상세 보기" onPress={() => router.push(`/roadmap/${item.roadmap.id}`)} />
-          </View>
-        )}
-      />
-      <Button title="새 로드맵 만들기" onPress={() => router.push('/roadmap/create')} />
-    </View>
+            <Link className="mt-2 inline-block text-orange-600 underline" href={`/roadmap/${row.roadmap.id}`}>
+              상세 보기
+            </Link>
+          </div>
+        ))}
+      </div>
+      <Link
+        href="/roadmap/create"
+        className="mt-6 inline-block rounded-lg bg-orange-500 px-4 py-3 font-semibold text-white"
+      >
+        + 새 로드맵 만들기
+      </Link>
+    </div>
   );
 }
 ```
 
-- [ ] **Step 2: 수동 확인**
+- [ ] **Step 3: 수동 확인**
 
-Run: `npx expo start` → 로그인 후 홈 화면에 생성된 로드맵들이 진행률과 함께 리스트로
-보이는지, 지연된 다음 마일스톤이 빨간색으로 표시되는지 확인
+Run: `npm run dev` → 로그인 후 홈 페이지에서 로드맵들이 진행률과 함께 카드로 보이는지,
+브라우저 폭을 줄였을 때(모바일 폭) 1열, 늘렸을 때(`sm` 이상) 2열로 바뀌는지 확인
 
-- [ ] **Step 3: 커밋**
+- [ ] **Step 4: 커밋**
 
 ```bash
-git add app/\(tabs\)/index.tsx
-git commit -m "feat: add home screen with roadmap list and progress"
+git add app/\(dashboard\)/page.tsx app/\(dashboard\)/layout.tsx
+git commit -m "feat: add home page with responsive roadmap grid"
 ```
 
 ---
 
-### Task 8: 로드맵 생성 화면 — 수동 입력 폼
+### Task 8: 로드맵 생성 페이지 — 수동 입력 폼
 
 **Files:**
-- Create: `app/roadmap/create.tsx`
+- Create: `app/roadmap/create/page.tsx`
 
 **Interfaces:**
 - Consumes: `createRoadmap` (Task 5), `createMilestone` (Task 6), `supabase` (Task 1)
@@ -1001,20 +1073,21 @@ git commit -m "feat: add home screen with roadmap list and progress"
 - [ ] **Step 1: 수동 입력 폼을 구현한다** (AI 플로우는 Task 17에서 이 파일에 추가한다)
 
 ```tsx
-// app/roadmap/create.tsx
+// app/roadmap/create/page.tsx
+'use client';
 import { useState } from 'react';
-import { View, Text, TextInput, Button, FlatList } from 'react-native';
-import { router } from 'expo-router';
-import { supabase } from '../../lib/supabase';
-import { createRoadmap } from '../../lib/roadmaps';
-import { createMilestone } from '../../lib/milestones';
+import { useRouter } from 'next/navigation';
+import { supabase } from '../../../lib/supabase';
+import { createRoadmap } from '../../../lib/roadmaps';
+import { createMilestone } from '../../../lib/milestones';
 
 interface DraftMilestone {
   title: string;
   due_date: string;
 }
 
-export default function CreateRoadmapScreen() {
+export default function CreateRoadmapPage() {
+  const router = useRouter();
   const [title, setTitle] = useState('');
   const [milestoneTitle, setMilestoneTitle] = useState('');
   const [milestoneDue, setMilestoneDue] = useState('');
@@ -1041,61 +1114,85 @@ export default function CreateRoadmapScreen() {
   }
 
   return (
-    <View style={{ flex: 1, padding: 24, gap: 12 }}>
-      <Text style={{ fontSize: 20, fontWeight: '700' }}>새 로드맵 만들기</Text>
-      <TextInput placeholder="목표를 알려주세요" value={title} onChangeText={setTitle} />
-      <Text>마일스톤 추가</Text>
-      <TextInput placeholder="마일스톤 제목" value={milestoneTitle} onChangeText={setMilestoneTitle} />
-      <TextInput placeholder="마감일 (YYYY-MM-DD)" value={milestoneDue} onChangeText={setMilestoneDue} />
-      <Button title="+ 마일스톤 추가" onPress={addDraftMilestone} />
-      <FlatList
-        data={draftMilestones}
-        keyExtractor={(item, index) => `${item.title}-${index}`}
-        renderItem={({ item }) => <Text>- {item.title} ({item.due_date})</Text>}
+    <div className="mx-auto max-w-xl space-y-4 p-6">
+      <h1 className="text-xl font-bold">새 로드맵 만들기</h1>
+      <input
+        className="w-full rounded-lg border p-3"
+        placeholder="목표를 알려주세요"
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
       />
-      <Button title="로드맵 만들기" onPress={handleSubmit} />
-    </View>
+      <div className="rounded-xl border p-4">
+        <p className="mb-2 font-medium">마일스톤 추가</p>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <input
+            className="flex-1 rounded-lg border p-3"
+            placeholder="마일스톤 제목"
+            value={milestoneTitle}
+            onChange={(e) => setMilestoneTitle(e.target.value)}
+          />
+          <input
+            className="rounded-lg border p-3"
+            type="date"
+            value={milestoneDue}
+            onChange={(e) => setMilestoneDue(e.target.value)}
+          />
+          <button className="rounded-lg border px-4 py-2" onClick={addDraftMilestone}>
+            + 추가
+          </button>
+        </div>
+        <ul className="mt-3 space-y-1 text-sm text-gray-700">
+          {draftMilestones.map((m, index) => (
+            <li key={`${m.title}-${index}`}>- {m.title} ({m.due_date})</li>
+          ))}
+        </ul>
+      </div>
+      <button className="w-full rounded-lg bg-orange-500 p-3 font-semibold text-white" onClick={handleSubmit}>
+        로드맵 만들기
+      </button>
+    </div>
   );
 }
 ```
 
 - [ ] **Step 2: 수동 확인**
 
-Run: `npx expo start` → 목표 제목과 마일스톤 2~3개를 추가해 제출 → 로드맵 상세로
+Run: `npm run dev` → 목표 제목과 마일스톤 2~3개를 추가해 제출 → 로드맵 상세로
 이동하고 Supabase Studio에서 `roadmaps`/`milestones` 행이 생성됐는지 확인
 
 - [ ] **Step 3: 커밋**
 
 ```bash
-git add app/roadmap/create.tsx
+git add app/roadmap/create/page.tsx
 git commit -m "feat: add manual roadmap creation form"
 ```
 
 ---
 
-### Task 9: 로드맵 상세 화면 — 마일스톤 리스트 뷰
+### Task 9: 로드맵 상세 페이지 — 마일스톤 리스트 뷰
 
 **Files:**
-- Create: `app/roadmap/[id].tsx`
+- Create: `app/roadmap/[id]/page.tsx`
 
 **Interfaces:**
 - Consumes: `getRoadmap` (Task 5), `listMilestones` (Task 6), `calculateProgress`, `milestoneStatus` (Task 4)
 
-- [ ] **Step 1: 리스트 기반 상세 화면을 구현한다** (경로형 시각화는 Task 11에서 교체한다)
+- [ ] **Step 1: 리스트 기반 상세 페이지를 구현한다** (경로형 시각화는 Task 11에서 확장한다)
 
 ```tsx
-// app/roadmap/[id].tsx
+// app/roadmap/[id]/page.tsx
+'use client';
 import { useEffect, useState } from 'react';
-import { View, Text, FlatList } from 'react-native';
-import { useLocalSearchParams, router } from 'expo-router';
-import { supabase } from '../../lib/supabase';
-import { getRoadmap } from '../../lib/roadmaps';
-import { listMilestones } from '../../lib/milestones';
-import { calculateProgress, milestoneStatus } from '../../lib/progress';
-import type { Roadmap, Milestone } from '../../types/models';
+import Link from 'next/link';
+import { useParams } from 'next/navigation';
+import { supabase } from '../../../lib/supabase';
+import { getRoadmap } from '../../../lib/roadmaps';
+import { listMilestones } from '../../../lib/milestones';
+import { calculateProgress, milestoneStatus } from '../../../lib/progress';
+import type { Roadmap, Milestone } from '../../../types/models';
 
-export default function RoadmapDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+export default function RoadmapDetailPage() {
+  const { id } = useParams<{ id: string }>();
   const [roadmap, setRoadmap] = useState<Roadmap | null>(null);
   const [milestones, setMilestones] = useState<Milestone[]>([]);
 
@@ -1113,67 +1210,67 @@ export default function RoadmapDetailScreen() {
   const now = new Date();
 
   return (
-    <View style={{ flex: 1, padding: 24, gap: 16 }}>
-      <Text style={{ fontSize: 20, fontWeight: '700' }}>{roadmap.title}</Text>
-      <Text>전체 진행률 {progress.percent}% ({progress.completedCount}/{progress.totalCount})</Text>
-      <FlatList
-        data={milestones}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item }) => {
-          const status = milestoneStatus(item, now);
+    <div className="mx-auto max-w-2xl p-6">
+      <h1 className="text-xl font-bold">{roadmap.title}</h1>
+      <p className="text-sm text-gray-600">
+        전체 진행률 {progress.percent}% ({progress.completedCount}/{progress.totalCount})
+      </p>
+      <ul className="mt-4 space-y-2">
+        {milestones.map((milestone) => {
+          const status = milestoneStatus(milestone, now);
           return (
-            <View
-              style={{ padding: 12, borderWidth: 1, borderRadius: 12, marginBottom: 8 }}
-              onTouchEnd={() => router.push(`/milestone/${item.id}`)}
-            >
-              <Text style={{ fontWeight: '600' }}>{item.title}</Text>
-              <Text style={{ color: status === 'overdue' ? 'red' : '#666' }}>
-                {item.due_date} · {status}
-              </Text>
-            </View>
+            <li key={milestone.id}>
+              <Link href={`/milestone/${milestone.id}`} className="block rounded-xl border p-3">
+                <p className="font-medium">{milestone.title}</p>
+                <p className={status === 'overdue' ? 'text-red-600' : 'text-gray-500'}>
+                  {milestone.due_date} · {status}
+                </p>
+              </Link>
+            </li>
           );
-        }}
-      />
-    </View>
+        })}
+      </ul>
+    </div>
   );
 }
 ```
 
 - [ ] **Step 2: 수동 확인**
 
-Run: `npx expo start` → 홈에서 로드맵 상세로 진입해 마일스톤 목록과 진행률, 지연 표시가
+Run: `npm run dev` → 홈에서 로드맵 상세로 진입해 마일스톤 목록과 진행률, 지연 표시가
 보이는지 확인
 
 - [ ] **Step 3: 커밋**
 
 ```bash
-git add app/roadmap/\[id\].tsx
-git commit -m "feat: add roadmap detail screen with milestone list view"
+git add app/roadmap/\[id\]/page.tsx
+git commit -m "feat: add roadmap detail page with milestone list view"
 ```
 
 ---
 
-### Task 10: 마일스톤 상세 화면 — 체크/메모/마감일 수정
+### Task 10: 마일스톤 상세 페이지 — 체크/메모/마감일 수정
 
 **Files:**
-- Create: `app/milestone/[id].tsx`
+- Create: `app/milestone/[id]/page.tsx`
 
 **Interfaces:**
-- Consumes: `updateMilestone` (Task 6), `milestoneStatus` (Task 4)
+- Consumes: `updateMilestone` (Task 6)
 
-- [ ] **Step 1: 화면을 구현한다**
+- [ ] **Step 1: 페이지를 구현한다**
 
 ```tsx
-// app/milestone/[id].tsx
+// app/milestone/[id]/page.tsx
+'use client';
 import { useEffect, useState } from 'react';
-import { View, Text, TextInput, Button, Switch } from 'react-native';
-import { useLocalSearchParams, router } from 'expo-router';
-import { supabase } from '../../lib/supabase';
-import { updateMilestone } from '../../lib/milestones';
-import type { Milestone } from '../../types/models';
+import { useParams, useRouter } from 'next/navigation';
+import { supabase } from '../../../lib/supabase';
+import { updateMilestone } from '../../../lib/milestones';
+import type { Milestone } from '../../../types/models';
 
-export default function MilestoneDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+export default function MilestoneDetailPage() {
+  const { id } = useParams<{ id: string }>();
+  const router = useRouter();
   const [milestone, setMilestone] = useState<Milestone | null>(null);
   const [description, setDescription] = useState('');
   const [dueDate, setDueDate] = useState('');
@@ -1182,71 +1279,81 @@ export default function MilestoneDetailScreen() {
     async function load() {
       if (!id) return;
       const { data } = await supabase.from('milestones').select('*').eq('id', id).single();
-      setMilestone(data as Milestone);
-      setDescription((data as Milestone)?.description ?? '');
-      setDueDate((data as Milestone)?.due_date ?? '');
+      const row = data as Milestone;
+      setMilestone(row);
+      setDescription(row?.description ?? '');
+      setDueDate(row?.due_date ?? '');
     }
     load();
   }, [id]);
 
   if (!milestone) return null;
 
-  async function toggleDone(value: boolean) {
+  async function toggleDone(checked: boolean) {
     if (!milestone) return;
     const updated = await updateMilestone(supabase, milestone.id, {
-      status: value ? 'done' : 'pending',
-      completed_at: value ? new Date().toISOString() : null,
+      status: checked ? 'done' : 'pending',
+      completed_at: checked ? new Date().toISOString() : null,
     });
     setMilestone(updated);
   }
 
   async function saveEdits() {
     if (!milestone) return;
-    const updated = await updateMilestone(supabase, milestone.id, { description, due_date: dueDate });
-    setMilestone(updated);
+    await updateMilestone(supabase, milestone.id, { description, due_date: dueDate });
     router.back();
   }
 
   return (
-    <View style={{ flex: 1, padding: 24, gap: 12 }}>
-      <Text style={{ fontSize: 20, fontWeight: '700' }}>{milestone.title}</Text>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-        <Text>완료</Text>
-        <Switch value={milestone.status === 'done'} onValueChange={toggleDone} />
-      </View>
-      <Text>메모</Text>
-      <TextInput value={description} onChangeText={setDescription} multiline />
-      <Text>마감일 (YYYY-MM-DD)</Text>
-      <TextInput value={dueDate} onChangeText={setDueDate} />
-      <Button title="저장" onPress={saveEdits} />
-    </View>
+    <div className="mx-auto max-w-xl space-y-4 p-6">
+      <h1 className="text-xl font-bold">{milestone.title}</h1>
+      <label className="flex items-center gap-2">
+        <input type="checkbox" checked={milestone.status === 'done'} onChange={(e) => toggleDone(e.target.checked)} />
+        완료
+      </label>
+      <div>
+        <p className="mb-1 text-sm font-medium">메모</p>
+        <textarea
+          className="w-full rounded-lg border p-3"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+        />
+      </div>
+      <div>
+        <p className="mb-1 text-sm font-medium">마감일</p>
+        <input className="rounded-lg border p-3" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+      </div>
+      <button className="rounded-lg bg-orange-500 px-4 py-3 font-semibold text-white" onClick={saveEdits}>
+        저장
+      </button>
+    </div>
   );
 }
 ```
 
 - [ ] **Step 2: 수동 확인**
 
-Run: `npx expo start` → 마일스톤 체크 토글 시 상태가 `done`으로 바뀌는지, 마감일을
-수정하고 로드맵 상세로 돌아가면 지연 상태가 재계산되는지 확인
+Run: `npm run dev` → 체크박스로 완료 토글 시 상태가 `done`으로 바뀌는지, 마감일을
+수정하고 저장하면 로드맵 상세로 돌아가 지연 상태가 재계산되는지 확인
 
 - [ ] **Step 3: 커밋**
 
 ```bash
-git add app/milestone/\[id\].tsx
-git commit -m "feat: add milestone detail screen with check/edit"
+git add app/milestone/\[id\]/page.tsx
+git commit -m "feat: add milestone detail page with check/edit"
 ```
 
 ---
 
-### Task 11: 경로형 타임라인 좌표 계산 + 로드맵 상세에 적용
+### Task 11: 경로형 타임라인 좌표 계산 + 반응형 적용
 
 **Files:**
 - Create: `lib/timeline.ts`
-- Modify: `app/roadmap/[id].tsx` (Task 9에서 만든 리스트 뷰를 타임라인으로 교체)
+- Modify: `app/roadmap/[id]/page.tsx` (좁은 화면용 리스트는 유지하고, 넓은 화면용 타임라인을 추가한다)
 - Test: `__tests__/timeline.test.ts`
 
 **Interfaces:**
-- Produces: `computeNodePositions(count: number): { x: number; y: number; side: 'left' | 'right' }[]`
+- Produces: `computeNodePositions(count: number): { xPercent: number; y: number; side: 'left' | 'right' }[]`
 
 - [ ] **Step 1: 실패하는 테스트를 작성한다**
 
@@ -1261,8 +1368,14 @@ test('alternates left and right starting with left', () => {
 
 test('increases y by a fixed row height per node', () => {
   const positions = computeNodePositions(3);
-  expect(positions[1].y - positions[0].y).toBe(150);
-  expect(positions[2].y - positions[1].y).toBe(150);
+  expect(positions[1].y - positions[0].y).toBe(140);
+  expect(positions[2].y - positions[1].y).toBe(140);
+});
+
+test('uses a fixed horizontal percent for each side so the layout scales with container width', () => {
+  const positions = computeNodePositions(2);
+  expect(positions[0].xPercent).toBeCloseTo(0.15);
+  expect(positions[1].xPercent).toBeCloseTo(0.75);
 });
 
 test('returns an empty array for zero milestones', () => {
@@ -1275,26 +1388,27 @@ test('returns an empty array for zero milestones', () => {
 Run: `npx jest timeline.test.ts`
 Expected: FAIL with "Cannot find module '../lib/timeline'"
 
-- [ ] **Step 3: 구현한다**
+- [ ] **Step 3: 구현한다** (좌우 위치를 픽셀이 아닌 컨테이너 폭 대비 비율로 반환해
+어떤 화면 크기에서도 컨테이너에 맞춰 스케일되게 한다)
 
 ```ts
 // lib/timeline.ts
 export interface NodePosition {
-  x: number;
+  xPercent: number;
   y: number;
   side: 'left' | 'right';
 }
 
-const LEFT_X = 60;
-const RIGHT_X = 280;
-const ROW_HEIGHT = 150;
+const LEFT_PERCENT = 0.15;
+const RIGHT_PERCENT = 0.75;
+const ROW_HEIGHT = 140;
 const TOP_OFFSET = 40;
 
 export function computeNodePositions(count: number): NodePosition[] {
   const positions: NodePosition[] = [];
   for (let i = 0; i < count; i++) {
     const side: 'left' | 'right' = i % 2 === 0 ? 'left' : 'right';
-    positions.push({ x: side === 'left' ? LEFT_X : RIGHT_X, y: TOP_OFFSET + i * ROW_HEIGHT, side });
+    positions.push({ xPercent: side === 'left' ? LEFT_PERCENT : RIGHT_PERCENT, y: TOP_OFFSET + i * ROW_HEIGHT, side });
   }
   return positions;
 }
@@ -1303,62 +1417,81 @@ export function computeNodePositions(count: number): NodePosition[] {
 - [ ] **Step 4: 테스트 실행 → 통과 확인**
 
 Run: `npx jest timeline.test.ts`
-Expected: PASS (3 tests)
+Expected: PASS (4 tests)
 
-- [ ] **Step 5: 로드맵 상세 화면의 `FlatList`를 좌표 기반 노드 뷰로 교체한다**
+- [ ] **Step 5: 로드맵 상세 페이지에 브레이크포인트별 두 가지 뷰를 추가한다** (좁은
+화면은 Task 9의 리스트를 유지하고, `sm` 이상에서만 경로형 뷰를 보여준다)
 
 ```tsx
-// app/roadmap/[id].tsx 의 렌더 부분 교체 (state/로딩 로직은 Task 9와 동일하게 유지)
-import { computeNodePositions } from '../../lib/timeline';
+// app/roadmap/[id]/page.tsx 의 렌더 부분을 다음으로 교체 (state/로딩 로직은 Task 9와 동일)
+import { computeNodePositions } from '../../../lib/timeline';
 // ...
 const positions = computeNodePositions(milestones.length);
-const pathHeight = 40 + milestones.length * 150 + 100; // TOP_OFFSET + rows + bottom padding
+const pathHeight = 40 + milestones.length * 140 + 100;
+
 return (
-  <View style={{ flex: 1, padding: 24 }}>
-    <Text style={{ fontSize: 20, fontWeight: '700' }}>{roadmap.title}</Text>
-    <Text>전체 진행률 {progress.percent}% ({progress.completedCount}/{progress.totalCount})</Text>
-    <View style={{ position: 'relative', height: pathHeight }}>
+  <div className="mx-auto max-w-2xl p-6">
+    <h1 className="text-xl font-bold">{roadmap.title}</h1>
+    <p className="text-sm text-gray-600">
+      전체 진행률 {progress.percent}% ({progress.completedCount}/{progress.totalCount})
+    </p>
+
+    {/* 좁은 화면: 세로 리스트 */}
+    <ul className="mt-4 space-y-2 sm:hidden">
+      {milestones.map((milestone) => {
+        const status = milestoneStatus(milestone, now);
+        return (
+          <li key={milestone.id}>
+            <Link href={`/milestone/${milestone.id}`} className="block rounded-xl border p-3">
+              <p className="font-medium">{milestone.title}</p>
+              <p className={status === 'overdue' ? 'text-red-600' : 'text-gray-500'}>
+                {milestone.due_date} · {status}
+              </p>
+            </Link>
+          </li>
+        );
+      })}
+    </ul>
+
+    {/* 넓은 화면: 경로형 타임라인 */}
+    <div className="relative mt-4 hidden sm:block" style={{ height: pathHeight }}>
       {milestones.map((milestone, index) => {
         const pos = positions[index];
         const status = milestoneStatus(milestone, now);
         return (
-          <View
+          <Link
             key={milestone.id}
-            style={{ position: 'absolute', left: pos.x, top: pos.y }}
-            onTouchEnd={() => router.push(`/milestone/${milestone.id}`)}
+            href={`/milestone/${milestone.id}`}
+            className="absolute flex -translate-x-1/2 flex-col items-center gap-1 text-center"
+            style={{ left: `${pos.xPercent * 100}%`, top: pos.y }}
           >
-            <View
-              style={{
-                width: 56,
-                height: 56,
-                borderRadius: 28,
-                backgroundColor: status === 'done' ? '#4caf50' : status === 'overdue' ? '#e53935' : '#eee',
-                justifyContent: 'center',
-                alignItems: 'center',
-              }}
+            <div
+              className={`flex h-14 w-14 items-center justify-center rounded-full font-semibold text-white ${
+                status === 'done' ? 'bg-green-500' : status === 'overdue' ? 'bg-red-500' : 'bg-gray-200 !text-gray-700'
+              }`}
             >
-              <Text style={{ color: status === 'pending' ? '#333' : 'white' }}>{index + 1}</Text>
-            </View>
-            <Text>{milestone.title}</Text>
-            <Text>{milestone.due_date}</Text>
-          </View>
+              {index + 1}
+            </div>
+            <span className="text-sm font-medium">{milestone.title}</span>
+            <span className="text-xs text-gray-500">{milestone.due_date}</span>
+          </Link>
         );
       })}
-    </View>
-  </View>
+    </div>
+  </div>
 );
 ```
 
 - [ ] **Step 6: 수동 확인**
 
-Run: `npx expo start` → 로드맵 상세에서 노드가 좌/우로 번갈아 배치되고, 완료/지연/대기
-상태 색이 구분되는지 확인
+Run: `npm run dev` → 브라우저 폭을 늘리면 좌/우로 번갈아 배치된 경로형 노드가,
+좁히면 세로 리스트가 보이는지, 완료/지연/대기 상태 색이 구분되는지 확인
 
 - [ ] **Step 7: 커밋**
 
 ```bash
-git add lib/timeline.ts __tests__/timeline.test.ts app/roadmap/\[id\].tsx
-git commit -m "feat: replace milestone list with path-style timeline"
+git add lib/timeline.ts __tests__/timeline.test.ts app/roadmap/\[id\]/page.tsx
+git commit -m "feat: add responsive path-style timeline for roadmap detail"
 ```
 
 ---
@@ -1454,11 +1587,11 @@ git commit -m "feat: add account-wide streak calculation"
 
 ---
 
-### Task 13: 체크인 기록/조회 + 홈 화면 스트릭 표시
+### Task 13: 체크인 기록/조회 + 홈 페이지 스트릭 표시
 
 **Files:**
 - Create: `lib/checkins.ts`
-- Modify: `app/(tabs)/index.tsx`
+- Modify: `app/(dashboard)/page.tsx`
 - Test: `__tests__/checkins.test.ts`
 
 **Interfaces:**
@@ -1535,10 +1668,10 @@ export async function getTodayStreak(client: SupabaseClient, userId: string, tod
 Run: `npx jest checkins.test.ts`
 Expected: PASS (2 tests)
 
-- [ ] **Step 5: 홈 화면에 스트릭 표시와 체크인 버튼을 추가한다**
+- [ ] **Step 5: 홈 페이지에 스트릭 표시와 체크인 버튼을 추가한다**
 
 ```tsx
-// app/(tabs)/index.tsx 에 추가
+// app/(dashboard)/page.tsx 상단에 추가
 import { recordCheckin, getTodayStreak } from '../../lib/checkins';
 // ...
 const [streak, setStreak] = useState(0);
@@ -1558,51 +1691,62 @@ async function handleCheckin() {
   if (!userId) return;
   setStreak(await recordCheckin(supabase, userId, new Date()));
 }
-// JSX에 <Text>{streak}일 연속</Text> 와 <Button title="오늘 체크인" onPress={handleCheckin} /> 추가
+```
+
+JSX 헤더 영역에 추가:
+
+```tsx
+<div className="mb-4 flex items-center justify-between">
+  <h1 className="text-2xl font-bold">내 목표</h1>
+  <div className="flex items-center gap-3">
+    <span className="rounded-full bg-orange-100 px-3 py-1 text-sm font-semibold text-orange-700">{streak}일 연속</span>
+    <button className="rounded-lg border px-3 py-1 text-sm" onClick={handleCheckin}>
+      오늘 체크인
+    </button>
+  </div>
+</div>
 ```
 
 - [ ] **Step 6: 수동 확인**
 
-Run: `npx expo start` → "오늘 체크인" 버튼을 누르면 스트릭 숫자가 올라가고, 앱을
-재시작해도 유지되는지 확인
+Run: `npm run dev` → "오늘 체크인" 버튼을 누르면 스트릭 숫자가 올라가고, 페이지를
+새로고침해도 유지되는지 확인
 
 - [ ] **Step 7: 커밋**
 
 ```bash
-git add lib/checkins.ts __tests__/checkins.test.ts app/\(tabs\)/index.tsx
+git add lib/checkins.ts __tests__/checkins.test.ts app/\(dashboard\)/page.tsx
 git commit -m "feat: add check-in recording and home streak display"
 ```
 
 ---
 
-### Task 14: 리마인더 시간 계산 + 푸시 알림 등록 + 설정 화면
+### Task 14: 브라우저 Web Push 구독 등록 + 설정 페이지
 
 **Files:**
 - Create: `lib/notifications.ts`
-- Create: `app/(tabs)/settings.tsx`
+- Create: `public/sw.js`
+- Create: `app/(dashboard)/settings/page.tsx`
 - Test: `__tests__/notifications.test.ts`
 
 **Interfaces:**
-- Produces: `nextReminderDate(reminderTime: string, now: Date): Date`,
-  `registerForPushNotificationsAsync(): Promise<string | null>`,
-  `scheduleDailyReminder(reminderTime: string): Promise<void>`
+- Produces: `subscribeToPush(vapidPublicKey: string): Promise<PushSubscriptionJSON | null>`,
+  `urlBase64ToUint8Array(base64String: string): Uint8Array`
 
 - [ ] **Step 1: 실패하는 테스트를 작성한다**
 
 ```ts
 // __tests__/notifications.test.ts
-import { nextReminderDate } from '../lib/notifications';
+import { urlBase64ToUint8Array } from '../lib/notifications';
 
-test('schedules today when the reminder time has not passed yet', () => {
-  const now = new Date('2026-09-07T08:00:00');
-  const result = nextReminderDate('09:00', now);
-  expect(result.toISOString()).toBe(new Date('2026-09-07T09:00:00').toISOString());
+test('decodes a base64url string into the expected byte array', () => {
+  // "SGVsbG8" is base64url for the ASCII bytes of "Hello"
+  expect(Array.from(urlBase64ToUint8Array('SGVsbG8'))).toEqual([72, 101, 108, 108, 111]);
 });
 
-test('schedules tomorrow when the reminder time already passed today', () => {
-  const now = new Date('2026-09-07T10:00:00');
-  const result = nextReminderDate('09:00', now);
-  expect(result.toISOString()).toBe(new Date('2026-09-08T09:00:00').toISOString());
+test('maps the URL-safe "-" and "_" characters back to standard base64 before decoding', () => {
+  // "-_-_" is the URL-safe form of the standard base64 string "+/+/"
+  expect(Array.from(urlBase64ToUint8Array('-_-_'))).toEqual([0xfb, 0xff, 0xbf]);
 });
 ```
 
@@ -1615,40 +1759,38 @@ Expected: FAIL with "Cannot find module '../lib/notifications'"
 
 ```ts
 // lib/notifications.ts
-import * as Notifications from 'expo-notifications';
-import * as Device from 'expo-device';
-
-export function nextReminderDate(reminderTime: string, now: Date): Date {
-  const [hours, minutes] = reminderTime.split(':').map(Number);
-  const next = new Date(now);
-  next.setHours(hours, minutes, 0, 0);
-  if (next.getTime() <= now.getTime()) {
-    next.setDate(next.getDate() + 1);
-  }
-  return next;
+export function urlBase64ToUint8Array(base64String: string): Uint8Array {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = atob(base64);
+  return Uint8Array.from([...rawData].map((char) => char.charCodeAt(0)));
 }
 
-export async function registerForPushNotificationsAsync(): Promise<string | null> {
-  if (!Device.isDevice) return null;
-  const { status: existingStatus } = await Notifications.getPermissionsAsync();
-  let finalStatus = existingStatus;
-  if (existingStatus !== 'granted') {
-    const { status } = await Notifications.requestPermissionsAsync();
-    finalStatus = status;
+export async function subscribeToPush(vapidPublicKey: string): Promise<PushSubscriptionJSON | null> {
+  if (typeof window === 'undefined' || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+    return null;
   }
-  if (finalStatus !== 'granted') return null;
-  const token = await Notifications.getExpoPushTokenAsync();
-  return token.data;
-}
-
-export async function scheduleDailyReminder(reminderTime: string): Promise<void> {
-  await Notifications.cancelAllScheduledNotificationsAsync();
-  const trigger = nextReminderDate(reminderTime, new Date());
-  await Notifications.scheduleNotificationAsync({
-    content: { title: '오늘의 체크인', body: '오늘 목표를 향해 한 걸음 나아가볼까요?' },
-    trigger,
+  const permission = await Notification.requestPermission();
+  if (permission !== 'granted') return null;
+  const registration = await navigator.serviceWorker.register('/sw.js');
+  const subscription = await registration.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
   });
+  return subscription.toJSON();
 }
+```
+
+```js
+// public/sw.js
+self.addEventListener('push', (event) => {
+  const data = event.data ? event.data.json() : {};
+  event.waitUntil(
+    self.registration.showNotification(data.title ?? '로드맵 알림', {
+      body: data.body ?? '',
+    })
+  );
+});
 ```
 
 - [ ] **Step 4: 테스트 실행 → 통과 확인**
@@ -1656,20 +1798,20 @@ export async function scheduleDailyReminder(reminderTime: string): Promise<void>
 Run: `npx jest notifications.test.ts`
 Expected: PASS (2 tests)
 
-- [ ] **Step 5: 설정 화면을 구현한다**
+- [ ] **Step 5: 설정 페이지를 구현한다**
 
 ```tsx
-// app/(tabs)/settings.tsx
+// app/(dashboard)/settings/page.tsx
+'use client';
 import { useState } from 'react';
-import { View, Text, Switch, Button } from 'react-native';
-import { router } from 'expo-router';
-import * as Notifications from 'expo-notifications';
-import { supabase } from '../../lib/supabase';
-import { registerForPushNotificationsAsync, scheduleDailyReminder } from '../../lib/notifications';
+import { useRouter } from 'next/navigation';
+import { supabase } from '../../../lib/supabase';
+import { subscribeToPush } from '../../../lib/notifications';
 
-const REMINDER_TIME = '09:00';
+const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY as string;
 
-export default function SettingsScreen() {
+export default function SettingsPage() {
+  const router = useRouter();
   const [reminderEnabled, setReminderEnabled] = useState(true);
 
   async function toggleReminder(value: boolean) {
@@ -1677,58 +1819,56 @@ export default function SettingsScreen() {
     const { data: userData } = await supabase.auth.getUser();
     const userId = userData.user?.id;
     if (!userId) return;
-    const pushToken = value ? await registerForPushNotificationsAsync() : null;
+    const subscription = value ? await subscribeToPush(VAPID_PUBLIC_KEY) : null;
     await supabase
       .from('notification_settings')
       .upsert(
-        { user_id: userId, reminder_enabled: value, reminder_time: REMINDER_TIME, push_token: pushToken },
+        { user_id: userId, reminder_enabled: value, reminder_time: '09:00', push_subscription: subscription },
         { onConflict: 'user_id' }
       );
-    if (value) {
-      await scheduleDailyReminder(REMINDER_TIME);
-    } else {
-      await Notifications.cancelAllScheduledNotificationsAsync();
-    }
   }
 
   async function handleLogout() {
     await supabase.auth.signOut();
-    router.replace('/(auth)/login');
+    router.replace('/login');
   }
 
   return (
-    <View style={{ flex: 1, padding: 24, gap: 16 }}>
-      <Text style={{ fontSize: 20, fontWeight: '700' }}>설정</Text>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-        <Text>알림 받기</Text>
-        <Switch value={reminderEnabled} onValueChange={toggleReminder} />
-      </View>
-      <Button title="로그아웃" onPress={handleLogout} />
-    </View>
+    <div className="mx-auto max-w-md space-y-4 p-6">
+      <h1 className="text-xl font-bold">설정</h1>
+      <label className="flex items-center gap-2">
+        <input type="checkbox" checked={reminderEnabled} onChange={(e) => toggleReminder(e.target.checked)} />
+        알림 받기
+      </label>
+      <button className="rounded-lg border px-4 py-2" onClick={handleLogout}>
+        로그아웃
+      </button>
+    </div>
   );
 }
 ```
 
 - [ ] **Step 6: 수동 확인**
 
-Run: `npx expo start` → 실기기/시뮬레이터에서 알림 권한 요청이 뜨는지, 토글 on 시
-`notification_settings.push_token`이 채워지는지, `await Notifications.getAllScheduledNotificationsAsync()`로
-로컬 리마인더가 예약됐는지, 로그아웃이 로그인 화면으로 보내는지 확인
+Run: `npm run dev` (HTTPS 또는 `localhost`에서 실행 — Web Push는 보안 컨텍스트 필요) →
+알림 받기를 켰을 때 브라우저 알림 권한 요청이 뜨는지, 허용 후
+`notification_settings.push_subscription`이 채워지는지, 로그아웃이 로그인 페이지로
+보내는지 확인
 
 - [ ] **Step 7: 커밋**
 
 ```bash
-git add lib/notifications.ts __tests__/notifications.test.ts app/\(tabs\)/settings.tsx
-git commit -m "feat: add push registration, reminder scheduling, and settings screen"
+git add lib/notifications.ts __tests__/notifications.test.ts public/sw.js app/\(dashboard\)/settings/page.tsx
+git commit -m "feat: add web push subscription and settings page"
 ```
 
 ---
 
-### Task 15: 진행률 대시보드 화면
+### Task 15: 진행률 대시보드 페이지
 
 **Files:**
 - Create: `lib/dashboard.ts`
-- Create: `app/(tabs)/dashboard.tsx`
+- Create: `app/(dashboard)/dashboard/page.tsx`
 - Test: `__tests__/dashboard.test.ts`
 
 **Interfaces:**
@@ -1794,18 +1934,18 @@ export function summarizeDashboard(entries: { roadmap: Roadmap; milestones: Mile
 Run: `npx jest dashboard.test.ts`
 Expected: PASS (2 tests)
 
-- [ ] **Step 5: 대시보드 화면을 구현한다**
+- [ ] **Step 5: 대시보드 페이지를 구현한다**
 
 ```tsx
-// app/(tabs)/dashboard.tsx
+// app/(dashboard)/dashboard/page.tsx
+'use client';
 import { useEffect, useState } from 'react';
-import { View, Text, FlatList } from 'react-native';
-import { supabase } from '../../lib/supabase';
-import { listRoadmaps } from '../../lib/roadmaps';
-import { listMilestones } from '../../lib/milestones';
-import { summarizeDashboard, DashboardSummary } from '../../lib/dashboard';
+import { supabase } from '../../../lib/supabase';
+import { listRoadmaps } from '../../../lib/roadmaps';
+import { listMilestones } from '../../../lib/milestones';
+import { summarizeDashboard, DashboardSummary } from '../../../lib/dashboard';
 
-export default function DashboardScreen() {
+export default function DashboardPage() {
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
 
   useEffect(() => {
@@ -1825,34 +1965,34 @@ export default function DashboardScreen() {
   if (!summary) return null;
 
   return (
-    <View style={{ flex: 1, padding: 24, gap: 16 }}>
-      <Text style={{ fontSize: 20, fontWeight: '700' }}>진행률 대시보드</Text>
-      <Text>전체 {summary.overallPercent}%</Text>
-      <FlatList
-        data={summary.roadmaps}
-        keyExtractor={(item) => item.roadmap.id}
-        renderItem={({ item }) => (
-          <View style={{ marginBottom: 12 }}>
-            <Text>{item.roadmap.title}</Text>
-            <Text>{item.progress.percent}% ({item.progress.completedCount}/{item.progress.totalCount})</Text>
-          </View>
-        )}
-      />
-    </View>
+    <div className="mx-auto max-w-2xl p-6">
+      <h1 className="text-xl font-bold">진행률 대시보드</h1>
+      <p className="mt-1 text-lg font-semibold text-orange-600">전체 {summary.overallPercent}%</p>
+      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {summary.roadmaps.map((item) => (
+          <div key={item.roadmap.id} className="rounded-xl border p-3">
+            <p className="font-medium">{item.roadmap.title}</p>
+            <p className="text-sm text-gray-600">
+              {item.progress.percent}% ({item.progress.completedCount}/{item.progress.totalCount})
+            </p>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 ```
 
 - [ ] **Step 6: 수동 확인**
 
-Run: `npx expo start` → 대시보드 탭에서 전체 진행률과 로드맵별 진행률이 홈 화면의
-개별 카드 값과 일치하는지 확인
+Run: `npm run dev` → 대시보드 페이지에서 전체 진행률과 로드맵별 진행률이 홈 페이지의
+개별 카드 값과 일치하는지, 반응형 그리드가 폭에 따라 바뀌는지 확인
 
 - [ ] **Step 7: 커밋**
 
 ```bash
-git add lib/dashboard.ts __tests__/dashboard.test.ts app/\(tabs\)/dashboard.tsx
-git commit -m "feat: add progress dashboard screen"
+git add lib/dashboard.ts __tests__/dashboard.test.ts app/\(dashboard\)/dashboard/page.tsx
+git commit -m "feat: add progress dashboard page"
 ```
 
 ---
@@ -2039,10 +2179,10 @@ git commit -m "feat: add AI roadmap generation edge function"
 
 ---
 
-### Task 17: 로드맵 생성 화면에 AI 플로우 연동
+### Task 17: 로드맵 생성 페이지에 AI 플로우 연동
 
 **Files:**
-- Modify: `app/roadmap/create.tsx`
+- Modify: `app/roadmap/create/page.tsx`
 
 **Interfaces:**
 - Consumes: `generate-roadmap` edge function (Task 16), `supabase.functions.invoke`
@@ -2050,7 +2190,7 @@ git commit -m "feat: add AI roadmap generation edge function"
 - [ ] **Step 1: 방식 선택 토글과 AI 제출 플로우를 추가한다**
 
 ```tsx
-// app/roadmap/create.tsx 상단부 교체/추가
+// app/roadmap/create/page.tsx 상단부에 추가
 const [mode, setMode] = useState<'ai' | 'manual'>('ai');
 const [aiDescription, setAiDescription] = useState('');
 const [aiError, setAiError] = useState<string | null>(null);
@@ -2071,26 +2211,88 @@ async function handleAiSubmit() {
 }
 ```
 
-JSX에 `mode === 'ai' ? AI 입력 폼(제목 + aiDescription + "AI로 로드맵 만들기" 버튼 →
-handleAiSubmit) : 기존 수동 입력 폼(Task 8)` 형태로 분기하고, 상단에 "AI가 만들어줘" /
-"직접 만들래" 두 개의 버튼으로 `setMode`를 전환한다. `aiError`가 있으면 폼 위에 표시한다.
+JSX 상단에 방식 선택 버튼 두 개를 추가하고 `mode`에 따라 분기한다:
+
+```tsx
+<div className="flex gap-2">
+  <button
+    className={`flex-1 rounded-lg p-3 font-semibold ${mode === 'ai' ? 'bg-orange-500 text-white' : 'border'}`}
+    onClick={() => setMode('ai')}
+  >
+    AI가 만들어줘
+  </button>
+  <button
+    className={`flex-1 rounded-lg p-3 font-semibold ${mode === 'manual' ? 'bg-orange-500 text-white' : 'border'}`}
+    onClick={() => setMode('manual')}
+  >
+    직접 만들래
+  </button>
+</div>
+{aiError && <p className="text-sm text-red-600">{aiError}</p>}
+{mode === 'ai' ? (
+  <div className="space-y-3 rounded-xl border p-4">
+    <input className="w-full rounded-lg border p-3" placeholder="목표를 알려주세요" value={title} onChange={(e) => setTitle(e.target.value)} />
+    <textarea
+      className="w-full rounded-lg border p-3"
+      placeholder="추가 설명 (선택)"
+      value={aiDescription}
+      onChange={(e) => setAiDescription(e.target.value)}
+    />
+    <button className="w-full rounded-lg bg-orange-500 p-3 font-semibold text-white" onClick={handleAiSubmit}>
+      AI로 로드맵 만들기
+    </button>
+  </div>
+) : (
+  <div className="rounded-xl border p-4">
+    <p className="mb-2 font-medium">마일스톤 추가</p>
+    <div className="flex flex-col gap-2 sm:flex-row">
+      <input
+        className="flex-1 rounded-lg border p-3"
+        placeholder="마일스톤 제목"
+        value={milestoneTitle}
+        onChange={(e) => setMilestoneTitle(e.target.value)}
+      />
+      <input
+        className="rounded-lg border p-3"
+        type="date"
+        value={milestoneDue}
+        onChange={(e) => setMilestoneDue(e.target.value)}
+      />
+      <button className="rounded-lg border px-4 py-2" onClick={addDraftMilestone}>
+        + 추가
+      </button>
+    </div>
+    <ul className="mt-3 space-y-1 text-sm text-gray-700">
+      {draftMilestones.map((m, index) => (
+        <li key={`${m.title}-${index}`}>- {m.title} ({m.due_date})</li>
+      ))}
+    </ul>
+    <button className="mt-3 w-full rounded-lg bg-orange-500 p-3 font-semibold text-white" onClick={handleSubmit}>
+      로드맵 만들기
+    </button>
+  </div>
+)}
+```
+
+이 JSX는 Task 8에서 만든 `milestoneTitle`/`milestoneDue`/`draftMilestones`/`addDraftMilestone`/`handleSubmit`
+state와 함수를 그대로 재사용한다 (같은 파일 안이므로 이미 스코프에 있다).
 
 - [ ] **Step 2: 수동 확인**
 
-Run: `npx expo start` → "AI가 만들어줘" 선택 후 목표를 입력해 제출 → 로드맵 상세로
+Run: `npm run dev` → "AI가 만들어줘" 선택 후 목표를 입력해 제출 → 로드맵 상세로
 이동하며 AI가 만든 마일스톤들이 보이는지 확인. Edge Function URL을 일시적으로 틀리게
 바꿔 실패를 재현했을 때 수동 입력 폼으로 폴백되는지도 확인
 
 - [ ] **Step 3: 커밋**
 
 ```bash
-git add app/roadmap/create.tsx
-git commit -m "feat: wire AI roadmap generation into create screen with manual fallback"
+git add app/roadmap/create/page.tsx
+git commit -m "feat: wire AI roadmap generation into create page with manual fallback"
 ```
 
 ---
 
-### Task 18: Edge Function `check-coaching` — 지연 감지 + 코칭 발송
+### Task 18: Edge Function `check-coaching` — 지연 감지 + Web Push 코칭 발송
 
 **Files:**
 - Create: `supabase/functions/check-coaching/select.ts`
@@ -2098,7 +2300,7 @@ git commit -m "feat: wire AI roadmap generation into create screen with manual f
 - Create: `supabase/functions/check-coaching/index.ts`
 
 **Interfaces:**
-- Consumes: `notification_settings.push_token` (Task 2)
+- Consumes: `notification_settings.push_subscription` (Task 2)
 - Produces: `selectOverdueMilestones(milestones, now): MilestoneForCoaching[]`, `buildCoachingPrompt(milestone): string`
 
 - [ ] **Step 1: 실패하는 Deno 테스트를 작성한다**
@@ -2160,17 +2362,24 @@ export function buildCoachingPrompt(milestone: MilestoneForCoaching): string {
 Run: `deno test supabase/functions/check-coaching/select.test.ts`
 Expected: PASS (3 tests)
 
-- [ ] **Step 5: 엣지 함수 핸들러를 작성한다**
+- [ ] **Step 5: 엣지 함수 핸들러를 작성한다** (Web Push 발송에는 `web-push` npm
+패키지를 Deno의 `npm:` 스펙시파이어로 가져온다)
 
 ```ts
 // supabase/functions/check-coaching/index.ts
 import { serve } from 'https://deno.land/std@0.208.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import webpush from 'npm:web-push@3.6.7';
 import { selectOverdueMilestones, buildCoachingPrompt } from './select.ts';
 
 const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY')!;
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+const VAPID_PUBLIC_KEY = Deno.env.get('VAPID_PUBLIC_KEY')!;
+const VAPID_PRIVATE_KEY = Deno.env.get('VAPID_PRIVATE_KEY')!;
+const VAPID_SUBJECT = Deno.env.get('VAPID_SUBJECT')!;
+
+webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
 
 serve(async () => {
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
@@ -2229,15 +2438,18 @@ serve(async () => {
 
     const { data: settings } = await supabase
       .from('notification_settings')
-      .select('reminder_enabled, push_token')
+      .select('reminder_enabled, push_subscription')
       .eq('user_id', milestone.user_id)
       .single();
-    if (settings?.reminder_enabled && settings.push_token) {
-      await fetch('https://exp.host/--/api/v2/push/send', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ to: settings.push_token, title: '로드맵 코칭', body: message }),
-      });
+    if (settings?.reminder_enabled && settings.push_subscription) {
+      try {
+        await webpush.sendNotification(
+          settings.push_subscription,
+          JSON.stringify({ title: '로드맵 코칭', body: message })
+        );
+      } catch (_err) {
+        // 구독이 만료됐을 수 있음 - MVP 범위에서는 무시하고 다음 실행에서 재시도
+      }
     }
   }
 
@@ -2253,22 +2465,153 @@ supabase functions schedule check-coaching --cron "0 9 * * *"
 ```
 
 수동 확인: 마감일을 과거로 설정한 마일스톤을 만든 뒤 `supabase functions invoke check-coaching`을
-직접 호출해 `coaching_messages`에 행이 생기고, 등록된 기기에 푸시가 오는지 확인
+직접 호출해 `coaching_messages`에 행이 생기고, 구독된 브라우저에 Web Push 알림이 오는지 확인
 
 - [ ] **Step 7: 커밋**
 
 ```bash
 git add supabase/functions/check-coaching
-git commit -m "feat: add scheduled coaching edge function for overdue milestones"
+git commit -m "feat: add scheduled coaching edge function with web push"
 ```
 
 ---
 
-### Task 19: 코칭 메시지 조회/읽음 처리 + 메시지함 화면
+### Task 19: Edge Function `send-reminders` — 리마인더 스케줄 발송
+
+**Files:**
+- Create: `supabase/functions/send-reminders/schedule.ts`
+- Create: `supabase/functions/send-reminders/schedule.test.ts`
+- Create: `supabase/functions/send-reminders/index.ts`
+
+**Interfaces:**
+- Produces: `isReminderDue(reminderTime: string, now: Date, windowMinutes: number): boolean`
+
+- [ ] **Step 1: 실패하는 Deno 테스트를 작성한다**
+
+```ts
+// supabase/functions/send-reminders/schedule.test.ts
+import { assertEquals } from 'https://deno.land/std@0.208.0/assert/mod.ts';
+import { isReminderDue } from './schedule.ts';
+
+Deno.test('is due when now falls inside the reminder window', () => {
+  assertEquals(isReminderDue('09:00', new Date('2026-09-07T09:05:00'), 15), true);
+});
+
+Deno.test('is not due before the reminder time', () => {
+  assertEquals(isReminderDue('09:00', new Date('2026-09-07T08:59:00'), 15), false);
+});
+
+Deno.test('is not due after the window has passed', () => {
+  assertEquals(isReminderDue('09:00', new Date('2026-09-07T09:20:00'), 15), false);
+});
+```
+
+- [ ] **Step 2: 테스트 실행 → 실패 확인**
+
+Run: `deno test supabase/functions/send-reminders/schedule.test.ts`
+Expected: FAIL — `schedule.ts` module not found
+
+- [ ] **Step 3: 구현한다**
+
+```ts
+// supabase/functions/send-reminders/schedule.ts
+export function isReminderDue(reminderTime: string, now: Date, windowMinutes: number): boolean {
+  const [hours, minutes] = reminderTime.split(':').map(Number);
+  const reminderMinutesOfDay = hours * 60 + minutes;
+  const nowMinutesOfDay = now.getHours() * 60 + now.getMinutes();
+  return nowMinutesOfDay >= reminderMinutesOfDay && nowMinutesOfDay < reminderMinutesOfDay + windowMinutes;
+}
+```
+
+- [ ] **Step 4: 테스트 실행 → 통과 확인**
+
+Run: `deno test supabase/functions/send-reminders/schedule.test.ts`
+Expected: PASS (3 tests)
+
+- [ ] **Step 5: 엣지 함수 핸들러를 작성한다** (15분마다 실행되어, 리마인더 시간
+창에 들어온 사용자 중 오늘 아직 체크인하지 않은 사람에게만 Web Push를 보낸다)
+
+```ts
+// supabase/functions/send-reminders/index.ts
+import { serve } from 'https://deno.land/std@0.208.0/http/server.ts';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import webpush from 'npm:web-push@3.6.7';
+import { isReminderDue } from './schedule.ts';
+
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+const VAPID_PUBLIC_KEY = Deno.env.get('VAPID_PUBLIC_KEY')!;
+const VAPID_PRIVATE_KEY = Deno.env.get('VAPID_PRIVATE_KEY')!;
+const VAPID_SUBJECT = Deno.env.get('VAPID_SUBJECT')!;
+
+webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+
+serve(async () => {
+  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+  const now = new Date();
+  const todayStr = now.toISOString().slice(0, 10);
+
+  const { data: settingsRows, error } = await supabase
+    .from('notification_settings')
+    .select('user_id, reminder_time, push_subscription')
+    .eq('reminder_enabled', true);
+  if (error) {
+    return new Response(JSON.stringify({ error: error.message }), { status: 500 });
+  }
+
+  const due = (settingsRows ?? []).filter(
+    (row: any) => isReminderDue(row.reminder_time, now, 15) && row.push_subscription
+  );
+
+  let sent = 0;
+  for (const row of due) {
+    const { data: checkin } = await supabase
+      .from('habit_checkins')
+      .select('id')
+      .eq('user_id', row.user_id)
+      .eq('checkin_date', todayStr)
+      .maybeSingle();
+    if (checkin) continue;
+    try {
+      await webpush.sendNotification(
+        row.push_subscription,
+        JSON.stringify({ title: '오늘의 체크인', body: '오늘 목표를 향해 한 걸음 나아가볼까요?' })
+      );
+      sent++;
+    } catch (_err) {
+      // 구독 만료 등 - MVP 범위에서는 무시
+    }
+  }
+
+  return new Response(JSON.stringify({ sent }), { status: 200 });
+});
+```
+
+- [ ] **Step 6: 배포하고 15분마다 실행되도록 스케줄을 등록한다**
+
+```bash
+supabase functions deploy send-reminders
+supabase functions schedule send-reminders --cron "*/15 * * * *"
+```
+
+수동 확인: `notification_settings.reminder_time`을 현재 시각 근처로 설정한 뒤
+`supabase functions invoke send-reminders`를 직접 호출해, 오늘 체크인하지 않은
+계정에만 알림이 오고 이미 체크인한 계정은 건너뛰는지 확인
+
+- [ ] **Step 7: 커밋**
+
+```bash
+git add supabase/functions/send-reminders
+git commit -m "feat: add scheduled reminder edge function with web push"
+```
+
+---
+
+### Task 20: 코칭 메시지 조회/읽음 처리 + 메시지함 페이지
 
 **Files:**
 - Create: `lib/coaching.ts`
-- Create: `app/(tabs)/coaching.tsx`
+- Create: `app/(dashboard)/coaching/page.tsx`
 - Test: `__tests__/coaching.test.ts`
 
 **Interfaces:**
@@ -2336,17 +2679,17 @@ export async function markRead(client: SupabaseClient, messageId: string): Promi
 Run: `npx jest coaching.test.ts`
 Expected: PASS (3 tests)
 
-- [ ] **Step 5: 메시지함 화면을 구현한다**
+- [ ] **Step 5: 메시지함 페이지를 구현한다**
 
 ```tsx
-// app/(tabs)/coaching.tsx
+// app/(dashboard)/coaching/page.tsx
+'use client';
 import { useEffect, useState } from 'react';
-import { View, Text, FlatList } from 'react-native';
-import { supabase } from '../../lib/supabase';
-import { listMessages, markRead } from '../../lib/coaching';
-import type { CoachingMessage } from '../../types/models';
+import { supabase } from '../../../lib/supabase';
+import { listMessages, markRead } from '../../../lib/coaching';
+import type { CoachingMessage } from '../../../types/models';
 
-export default function CoachingInboxScreen() {
+export default function CoachingInboxPage() {
   const [messages, setMessages] = useState<CoachingMessage[]>([]);
 
   useEffect(() => {
@@ -2366,34 +2709,34 @@ export default function CoachingInboxScreen() {
   }
 
   return (
-    <View style={{ flex: 1, padding: 24 }}>
-      <Text style={{ fontSize: 20, fontWeight: '700' }}>AI 코칭</Text>
-      <FlatList
-        data={messages}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item }) => (
-          <View
-            style={{ padding: 12, borderWidth: 1, borderRadius: 12, marginBottom: 8, opacity: item.read_at ? 0.6 : 1 }}
-            onTouchEnd={() => handleOpen(item)}
-          >
-            <Text>{item.message}</Text>
-            <Text style={{ fontSize: 12, color: '#666' }}>{item.created_at}</Text>
-          </View>
-        )}
-      />
-    </View>
+    <div className="mx-auto max-w-2xl p-6">
+      <h1 className="text-xl font-bold">AI 코칭</h1>
+      <ul className="mt-4 space-y-2">
+        {messages.map((item) => (
+          <li key={item.id}>
+            <button
+              className={`w-full rounded-xl border p-3 text-left ${item.read_at ? 'opacity-60' : ''}`}
+              onClick={() => handleOpen(item)}
+            >
+              <p>{item.message}</p>
+              <p className="text-xs text-gray-500">{item.created_at}</p>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 ```
 
 - [ ] **Step 6: 수동 확인**
 
-Run: `npx expo start` → Task 18에서 발송된 코칭 메시지가 메시지함에 보이고, 탭하면
-읽음 처리(옅어짐)되는지 확인
+Run: `npm run dev` → Task 18/19에서 발송된 코칭 메시지가 메시지함에 보이고, 클릭하면
+읽음 처리(옅어짐)되는지, 좁은/넓은 화면 모두에서 레이아웃이 깨지지 않는지 확인
 
 - [ ] **Step 7: 커밋**
 
 ```bash
-git add lib/coaching.ts __tests__/coaching.test.ts app/\(tabs\)/coaching.tsx
-git commit -m "feat: add coaching inbox screen"
+git add lib/coaching.ts __tests__/coaching.test.ts app/\(dashboard\)/coaching/page.tsx
+git commit -m "feat: add coaching inbox page"
 ```

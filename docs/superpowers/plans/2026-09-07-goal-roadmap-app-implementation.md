@@ -62,6 +62,7 @@ lib/
   config.ts                          # getSupabaseConfig (순수 함수)
   supabase.ts                        # Supabase 브라우저 클라이언트
   auth.ts                            # validateEmail/validatePassword
+  useAuth.ts                         # useRequireAuth/useRedirectIfAuthed (라우트 가드)
   progress.ts                        # calculateProgress/milestoneStatus (순수 함수)
   roadmaps.ts                        # 로드맵 CRUD + completeRoadmapIfAllDone
   milestones.ts                      # 마일스톤 CRUD
@@ -334,6 +335,23 @@ create policy "coaching_messages_owner" on public.coaching_messages
 
 create policy "notification_settings_owner" on public.notification_settings
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+-- 가입 직후에는 세션이 없어 클라이언트가 RLS를 통과해 notification_settings를
+-- 만들 수 없으므로(설정 화면에 한 번도 안 들어가면 리마인더 기본값이 영영
+-- 적용 안 됨), auth.users에 새 행이 생기면 서버 사이드에서 기본 행을 만든다.
+create or replace function public.handle_new_user()
+returns trigger as $$
+begin
+  insert into public.notification_settings (user_id, reminder_enabled, reminder_time)
+  values (new.id, true, '09:00')
+  on conflict (user_id) do nothing;
+  return new;
+end;
+$$ language plpgsql security definer set search_path = public;
+
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function public.handle_new_user();
 ```
 
 - [ ] **Step 2: 로컬 Supabase에 마이그레이션을 적용한다**
@@ -415,17 +433,21 @@ git commit -m "feat: add database schema with RLS and matching TS types"
 
 ---
 
-### Task 3: 이메일/비밀번호 인증
+### Task 3: 이메일/비밀번호 인증 + 라우트 가드
 
 **Files:**
 - Create: `lib/auth.ts`
+- Create: `lib/useAuth.ts`
 - Create: `app/(auth)/login/page.tsx`
 - Create: `app/(auth)/signup/page.tsx`
 - Test: `__tests__/auth.test.ts`
 
 **Interfaces:**
 - Consumes: `supabase` from `lib/supabase.ts` (Task 1)
-- Produces: `validateEmail(email: string): boolean`, `validatePassword(password: string): boolean`
+- Produces: `validateEmail(email: string): boolean`, `validatePassword(password: string): boolean`,
+  `useRequireAuth(): string | null` (로그인 안 됐으면 `/login`으로 보내고, 됐으면
+  `userId`를 반환 — Task 7/8/9/10/14/15/20이 이걸 가져다 쓴다),
+  `useRedirectIfAuthed(): void` (이미 로그인돼 있으면 `/`로 보냄)
 
 - [ ] **Step 1: 실패하는 테스트를 작성한다**
 
@@ -473,7 +495,54 @@ export function validatePassword(password: string): boolean {
 Run: `npx jest auth.test.ts`
 Expected: PASS (4 tests)
 
-- [ ] **Step 5: 로그인/회원가입 페이지를 만든다**
+- [ ] **Step 5: 라우트 가드 훅을 구현한다** (A: 비로그인 접근 차단, F: 이미 로그인된
+사용자가 로그인/가입 페이지에 다시 들어오는 것 방지 — 둘 다 이 파일 하나에 둔다)
+
+```ts
+// lib/useAuth.ts
+'use client';
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { supabase } from './supabase';
+
+export function useRequireAuth(): string | null {
+  const router = useRouter();
+  const [userId, setUserId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    supabase.auth.getUser().then(({ data }) => {
+      if (!active) return;
+      if (!data.user) {
+        router.replace('/login');
+        return;
+      }
+      setUserId(data.user.id);
+    });
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!session) router.replace('/login');
+    });
+    return () => {
+      active = false;
+      listener.subscription.unsubscribe();
+    };
+  }, [router]);
+
+  return userId;
+}
+
+export function useRedirectIfAuthed(): void {
+  const router = useRouter();
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      if (data.user) router.replace('/');
+    });
+  }, [router]);
+}
+```
+
+- [ ] **Step 6: 로그인/회원가입 페이지를 만든다** (이미 로그인된 사용자는
+`useRedirectIfAuthed`가 홈으로 돌려보낸다)
 
 ```tsx
 // app/(auth)/login/page.tsx
@@ -482,8 +551,10 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '../../../lib/supabase';
 import { validateEmail, validatePassword } from '../../../lib/auth';
+import { useRedirectIfAuthed } from '../../../lib/useAuth';
 
 export default function LoginPage() {
+  useRedirectIfAuthed();
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -532,8 +603,10 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '../../../lib/supabase';
 import { validateEmail, validatePassword } from '../../../lib/auth';
+import { useRedirectIfAuthed } from '../../../lib/useAuth';
 
 export default function SignupPage() {
+  useRedirectIfAuthed();
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -572,17 +645,21 @@ export default function SignupPage() {
 }
 ```
 
-- [ ] **Step 6: 수동 확인**
+- [ ] **Step 7: 수동 확인**
 
-Run: `npm run dev` → 회원가입 후 Supabase Studio의 `auth.users` 테이블에 행이 생기는지,
-로그인 성공 시 홈(`/`)으로 이동하는지, 좁은 화면(모바일 폭)에서도 폼이 중앙 정렬로
-잘 보이는지 확인
+Run: `npm run dev` → 회원가입 후 Supabase Studio의 `auth.users` 테이블에 행이 생기는지
+(그리고 Task 2에서 만든 트리거 덕분에 `notification_settings`에도 기본값 행이 자동으로
+생겼는지), 로그인 성공 시 홈(`/`)으로 이동을 시도하는지(홈 페이지 자체는 Task 7에서
+만들어지므로 지금은 빈 화면이어도 됨), 로그인된 상태에서 주소창에 직접 `/login`을
+입력해도 다시 `/`로 튕겨나오는지, 좁은 화면(모바일 폭)에서도 폼이 중앙 정렬로 잘
+보이는지 확인. 비로그인 상태에서 보호된 페이지에 들어가면 `/login`으로 튕기는지는
+Task 7에서 마저 확인한다
 
-- [ ] **Step 7: 커밋**
+- [ ] **Step 8: 커밋**
 
 ```bash
-git add lib/auth.ts app/\(auth\) __tests__/auth.test.ts
-git commit -m "feat: add email/password auth pages"
+git add lib/auth.ts lib/useAuth.ts app/\(auth\) __tests__/auth.test.ts
+git commit -m "feat: add email/password auth pages and route guard hooks"
 ```
 
 ---
@@ -689,6 +766,8 @@ git commit -m "feat: add progress and overdue calculation logic"
 - Consumes: `Roadmap`, `RoadmapSource` from `types/models.ts` (Task 2)
 - Produces: `createRoadmap(client, userId, input): Promise<Roadmap>`,
   `listRoadmaps(client, userId): Promise<Roadmap[]>`, `getRoadmap(client, roadmapId): Promise<Roadmap>`,
+  `deleteRoadmap(client, roadmapId): Promise<void>` (DB의 `on delete cascade`
+  덕분에 이 로드맵의 마일스톤도 함께 삭제된다),
   `makeFakeClient(results: { data: unknown; error: unknown }[])` (테스트 헬퍼, 이후 태스크에서 재사용)
 
 - [ ] **Step 1: 테스트용 가짜 Supabase 클라이언트를 작성한다**
@@ -706,10 +785,12 @@ export function makeFakeClient(results: FakeResult[]) {
       insert: jest.fn(() => builder),
       update: jest.fn(() => builder),
       upsert: jest.fn(() => builder),
+      delete: jest.fn(() => builder),
       select: jest.fn(() => builder),
       eq: jest.fn(() => builder),
       neq: jest.fn(() => builder),
       order: jest.fn(() => builder),
+      maybeSingle: jest.fn(() => Promise.resolve(result)),
       single: jest.fn(() => Promise.resolve(result)),
       then: (resolve: any, reject: any) => Promise.resolve(result).then(resolve, reject),
     };
@@ -723,7 +804,7 @@ export function makeFakeClient(results: FakeResult[]) {
 
 ```ts
 // __tests__/roadmaps.test.ts
-import { createRoadmap, listRoadmaps, getRoadmap } from '../lib/roadmaps';
+import { createRoadmap, listRoadmaps, getRoadmap, deleteRoadmap } from '../lib/roadmaps';
 import { makeFakeClient } from '../test-utils/fakeSupabaseClient';
 
 test('createRoadmap inserts and returns the created row', async () => {
@@ -757,6 +838,17 @@ test('getRoadmap returns a single row', async () => {
   const client = makeFakeClient([{ data: row, error: null }]);
   const result = await getRoadmap(client, '1');
   expect(result).toEqual(row);
+});
+
+test('deleteRoadmap deletes by id', async () => {
+  const client = makeFakeClient([{ data: null, error: null }]);
+  await deleteRoadmap(client, '1');
+  expect(client.from).toHaveBeenCalledWith('roadmaps');
+});
+
+test('deleteRoadmap throws when supabase returns an error', async () => {
+  const client = makeFakeClient([{ data: null, error: new Error('delete failed') }]);
+  await expect(deleteRoadmap(client, '1')).rejects.toThrow('delete failed');
 });
 ```
 
@@ -807,18 +899,23 @@ export async function getRoadmap(client: SupabaseClient, roadmapId: string): Pro
   if (error) throw error;
   return data as Roadmap;
 }
+
+export async function deleteRoadmap(client: SupabaseClient, roadmapId: string): Promise<void> {
+  const { error } = await client.from('roadmaps').delete().eq('id', roadmapId);
+  if (error) throw error;
+}
 ```
 
 - [ ] **Step 5: 테스트 실행 → 통과 확인**
 
 Run: `npx jest roadmaps.test.ts`
-Expected: PASS (5 tests)
+Expected: PASS (7 tests)
 
 - [ ] **Step 6: 커밋**
 
 ```bash
 git add lib/roadmaps.ts test-utils/fakeSupabaseClient.ts __tests__/roadmaps.test.ts
-git commit -m "feat: add roadmap CRUD with fake-client test harness"
+git commit -m "feat: add roadmap CRUD (including delete) with fake-client test harness"
 ```
 
 ---
@@ -832,13 +929,13 @@ git commit -m "feat: add roadmap CRUD with fake-client test harness"
 **Interfaces:**
 - Consumes: `Milestone` from `types/models.ts` (Task 2), `makeFakeClient` from `test-utils/fakeSupabaseClient.ts` (Task 5)
 - Produces: `createMilestone(client, input): Promise<Milestone>`, `listMilestones(client, roadmapId): Promise<Milestone[]>`,
-  `updateMilestone(client, milestoneId, patch): Promise<Milestone>`
+  `updateMilestone(client, milestoneId, patch): Promise<Milestone>`, `deleteMilestone(client, milestoneId): Promise<void>`
 
 - [ ] **Step 1: 실패하는 테스트를 작성한다**
 
 ```ts
 // __tests__/milestones.test.ts
-import { createMilestone, listMilestones, updateMilestone } from '../lib/milestones';
+import { createMilestone, listMilestones, updateMilestone, deleteMilestone } from '../lib/milestones';
 import { makeFakeClient } from '../test-utils/fakeSupabaseClient';
 
 test('createMilestone inserts and returns the created row', async () => {
@@ -865,6 +962,17 @@ test('updateMilestone applies a partial patch and returns the updated row', asyn
 test('updateMilestone throws when supabase returns an error', async () => {
   const client = makeFakeClient([{ data: null, error: new Error('update failed') }]);
   await expect(updateMilestone(client, 'm1', { status: 'done' })).rejects.toThrow('update failed');
+});
+
+test('deleteMilestone deletes by id', async () => {
+  const client = makeFakeClient([{ data: null, error: null }]);
+  await deleteMilestone(client, 'm1');
+  expect(client.from).toHaveBeenCalledWith('milestones');
+});
+
+test('deleteMilestone throws when supabase returns an error', async () => {
+  const client = makeFakeClient([{ data: null, error: new Error('delete failed') }]);
+  await expect(deleteMilestone(client, 'm1')).rejects.toThrow('delete failed');
 });
 ```
 
@@ -919,18 +1027,23 @@ export async function updateMilestone(
   if (error) throw error;
   return data as Milestone;
 }
+
+export async function deleteMilestone(client: SupabaseClient, milestoneId: string): Promise<void> {
+  const { error } = await client.from('milestones').delete().eq('id', milestoneId);
+  if (error) throw error;
+}
 ```
 
 - [ ] **Step 4: 테스트 실행 → 통과 확인**
 
 Run: `npx jest milestones.test.ts`
-Expected: PASS (4 tests)
+Expected: PASS (6 tests)
 
 - [ ] **Step 5: 커밋**
 
 ```bash
 git add lib/milestones.ts __tests__/milestones.test.ts
-git commit -m "feat: add milestone CRUD"
+git commit -m "feat: add milestone CRUD (including delete)"
 ```
 
 ---
@@ -942,7 +1055,8 @@ git commit -m "feat: add milestone CRUD"
 - Create: `app/(dashboard)/layout.tsx`
 
 **Interfaces:**
-- Consumes: `listRoadmaps` (Task 5), `listMilestones` (Task 6), `calculateProgress`, `milestoneStatus` (Task 4), `supabase` (Task 1)
+- Consumes: `listRoadmaps` (Task 5), `listMilestones` (Task 6), `calculateProgress`, `milestoneStatus` (Task 4),
+  `supabase` (Task 1), `useRequireAuth` (Task 3)
 
 - [ ] **Step 1: 공통 네비게이션 레이아웃을 만든다**
 
@@ -974,6 +1088,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '../../lib/supabase';
+import { useRequireAuth } from '../../lib/useAuth';
 import { listRoadmaps } from '../../lib/roadmaps';
 import { listMilestones } from '../../lib/milestones';
 import { calculateProgress, milestoneStatus } from '../../lib/progress';
@@ -987,13 +1102,12 @@ interface RoadmapRow {
 }
 
 export default function HomePage() {
+  const userId = useRequireAuth();
   const [rows, setRows] = useState<RoadmapRow[]>([]);
 
   useEffect(() => {
+    if (!userId) return;
     async function load() {
-      const { data: userData } = await supabase.auth.getUser();
-      const userId = userData.user?.id;
-      if (!userId) return;
       const roadmaps = await listRoadmaps(supabase, userId);
       const activeRoadmaps = roadmaps.filter((r) => r.status === 'active');
       const now = new Date();
@@ -1015,7 +1129,7 @@ export default function HomePage() {
       setRows(withProgress);
     }
     load();
-  }, []);
+  }, [userId]);
 
   return (
     <div className="mx-auto max-w-3xl p-6">
@@ -1055,7 +1169,8 @@ export default function HomePage() {
 Run: `npm run dev` → 로그인 후 홈 페이지에서 로드맵들이 진행률과 함께 카드로 보이는지,
 브라우저 폭을 줄였을 때(모바일 폭) 1열, 늘렸을 때(`sm` 이상) 2열로 바뀌는지 확인.
 Supabase Studio에서 로드맵 하나의 `status`를 수동으로 `completed`로 바꾸고 새로고침하면
-그 로드맵이 홈 목록에서 사라지는지도 확인(자동 전환 로직은 Task 10에서 붙인다)
+그 로드맵이 홈 목록에서 사라지는지도 확인(자동 전환 로직은 Task 10에서 붙인다).
+로그아웃한 뒤 주소창에 직접 `/`를 입력해서 들어가면 `/login`으로 바로 리다이렉트되는지도 확인
 
 - [ ] **Step 4: 커밋**
 
@@ -1072,7 +1187,7 @@ git commit -m "feat: add home page with responsive roadmap grid"
 - Create: `app/roadmap/create/page.tsx`
 
 **Interfaces:**
-- Consumes: `createRoadmap` (Task 5), `createMilestone` (Task 6), `supabase` (Task 1)
+- Consumes: `createRoadmap` (Task 5), `createMilestone` (Task 6), `supabase` (Task 1), `useRequireAuth` (Task 3)
 
 - [ ] **Step 1: 수동 입력 폼을 구현한다** (AI 플로우는 Task 17에서 이 파일에 추가한다)
 
@@ -1082,6 +1197,7 @@ git commit -m "feat: add home page with responsive roadmap grid"
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '../../../lib/supabase';
+import { useRequireAuth } from '../../../lib/useAuth';
 import { createRoadmap } from '../../../lib/roadmaps';
 import { createMilestone } from '../../../lib/milestones';
 
@@ -1091,6 +1207,7 @@ interface DraftMilestone {
 }
 
 export default function CreateRoadmapPage() {
+  const userId = useRequireAuth();
   const router = useRouter();
   const [title, setTitle] = useState('');
   const [milestoneTitle, setMilestoneTitle] = useState('');
@@ -1105,8 +1222,6 @@ export default function CreateRoadmapPage() {
   }
 
   async function handleSubmit() {
-    const { data: userData } = await supabase.auth.getUser();
-    const userId = userData.user?.id;
     if (!userId || !title) return;
     const roadmap = await createRoadmap(supabase, userId, { title, source: 'manual' });
     await Promise.all(
@@ -1173,41 +1288,74 @@ git commit -m "feat: add manual roadmap creation form"
 
 ---
 
-### Task 9: 로드맵 상세 페이지 — 마일스톤 리스트 뷰
+### Task 9: 로드맵 상세 페이지 — 마일스톤 리스트 뷰 + 마일스톤 추가/로드맵 삭제
 
 **Files:**
 - Create: `app/roadmap/[id]/page.tsx`
 
 **Interfaces:**
-- Consumes: `getRoadmap` (Task 5), `listMilestones` (Task 6), `calculateProgress`, `milestoneStatus` (Task 4)
+- Consumes: `getRoadmap`, `deleteRoadmap` (Task 5), `listMilestones`, `createMilestone` (Task 6),
+  `calculateProgress`, `milestoneStatus` (Task 4), `useRequireAuth` (Task 3)
 
-- [ ] **Step 1: 리스트 기반 상세 페이지를 구현한다** (경로형 시각화는 Task 11에서 확장한다)
+- [ ] **Step 1: 리스트 기반 상세 페이지를 구현한다** (경로형 시각화는 Task 11에서 `<ul>`
+목록 부분만 교체해서 확장한다 — 그 위의 헤더/마일스톤 추가/삭제 UI는 그대로 둔다)
 
 ```tsx
 // app/roadmap/[id]/page.tsx
 'use client';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { supabase } from '../../../lib/supabase';
-import { getRoadmap } from '../../../lib/roadmaps';
-import { listMilestones } from '../../../lib/milestones';
+import { useRequireAuth } from '../../../lib/useAuth';
+import { getRoadmap, deleteRoadmap } from '../../../lib/roadmaps';
+import { listMilestones, createMilestone } from '../../../lib/milestones';
 import { calculateProgress, milestoneStatus } from '../../../lib/progress';
 import type { Roadmap, Milestone } from '../../../types/models';
 
 export default function RoadmapDetailPage() {
+  const userId = useRequireAuth();
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
   const [roadmap, setRoadmap] = useState<Roadmap | null>(null);
   const [milestones, setMilestones] = useState<Milestone[]>([]);
+  const [newMilestoneTitle, setNewMilestoneTitle] = useState('');
+  const [newMilestoneDue, setNewMilestoneDue] = useState('');
+
+  async function load() {
+    if (!id) return;
+    setRoadmap(await getRoadmap(supabase, id));
+    setMilestones(await listMilestones(supabase, id));
+  }
 
   useEffect(() => {
-    async function load() {
-      if (!id) return;
-      setRoadmap(await getRoadmap(supabase, id));
-      setMilestones(await listMilestones(supabase, id));
-    }
+    if (!userId || !id) return;
     load();
-  }, [id]);
+  }, [userId, id]);
+
+  async function handleAddMilestone() {
+    if (!id || !newMilestoneTitle || !newMilestoneDue) return;
+    await createMilestone(supabase, {
+      roadmap_id: id,
+      title: newMilestoneTitle,
+      due_date: newMilestoneDue,
+      order_index: milestones.length,
+    });
+    // 완료 처리됐던 로드맵에 마일스톤을 새로 추가하면 다시 진행 중으로 되돌린다
+    if (roadmap?.status === 'completed') {
+      await supabase.from('roadmaps').update({ status: 'active' }).eq('id', id);
+    }
+    setNewMilestoneTitle('');
+    setNewMilestoneDue('');
+    await load();
+  }
+
+  async function handleDeleteRoadmap() {
+    if (!id) return;
+    if (!confirm('이 로드맵과 모든 마일스톤을 삭제할까요? 되돌릴 수 없어요.')) return;
+    await deleteRoadmap(supabase, id);
+    router.replace('/');
+  }
 
   if (!roadmap) return null;
   const progress = calculateProgress(milestones);
@@ -1215,10 +1363,37 @@ export default function RoadmapDetailPage() {
 
   return (
     <div className="mx-auto max-w-2xl p-6">
-      <h1 className="text-xl font-bold">{roadmap.title}</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl font-bold">{roadmap.title}</h1>
+        <button className="text-sm text-red-600 underline" onClick={handleDeleteRoadmap}>
+          로드맵 삭제
+        </button>
+      </div>
       <p className="text-sm text-gray-600">
         전체 진행률 {progress.percent}% ({progress.completedCount}/{progress.totalCount})
       </p>
+
+      <div className="mt-4 rounded-xl border p-4">
+        <p className="mb-2 text-sm font-medium">마일스톤 추가</p>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <input
+            className="flex-1 rounded-lg border p-3"
+            placeholder="마일스톤 제목"
+            value={newMilestoneTitle}
+            onChange={(e) => setNewMilestoneTitle(e.target.value)}
+          />
+          <input
+            className="rounded-lg border p-3"
+            type="date"
+            value={newMilestoneDue}
+            onChange={(e) => setNewMilestoneDue(e.target.value)}
+          />
+          <button className="rounded-lg border px-4 py-2" onClick={handleAddMilestone}>
+            + 추가
+          </button>
+        </div>
+      </div>
+
       <ul className="mt-4 space-y-2">
         {milestones.map((milestone) => {
           const status = milestoneStatus(milestone, now);
@@ -1242,13 +1417,15 @@ export default function RoadmapDetailPage() {
 - [ ] **Step 2: 수동 확인**
 
 Run: `npm run dev` → 홈에서 로드맵 상세로 진입해 마일스톤 목록과 진행률, 지연 표시가
-보이는지 확인
+보이는지 확인. "+ 추가"로 마일스톤을 하나 더 넣으면 목록에 바로 반영되는지, "로드맵
+삭제"를 누르면 확인창 뒤에 홈으로 돌아가고 Supabase Studio에서 그 로드맵과 마일스톤이
+전부 사라졌는지(`on delete cascade`) 확인
 
 - [ ] **Step 3: 커밋**
 
 ```bash
 git add app/roadmap/\[id\]/page.tsx
-git commit -m "feat: add roadmap detail page with milestone list view"
+git commit -m "feat: add roadmap detail page with add-milestone and delete-roadmap"
 ```
 
 ---
@@ -1261,7 +1438,8 @@ git commit -m "feat: add roadmap detail page with milestone list view"
 - Test: `__tests__/roadmaps.test.ts` (Task 5에서 만든 파일에 케이스를 추가한다)
 
 **Interfaces:**
-- Consumes: `updateMilestone`, `listMilestones` (Task 6), `makeFakeClient` (Task 5)
+- Consumes: `updateMilestone`, `listMilestones`, `deleteMilestone` (Task 6), `makeFakeClient` (Task 5),
+  `useRequireAuth` (Task 3)
 - Produces: `completeRoadmapIfAllDone(client, roadmapId): Promise<void>`
 
 - [ ] **Step 1: 실패하는 테스트를 추가한다** (`lib/roadmaps.ts`에 로드맵을 자동으로
@@ -1318,7 +1496,7 @@ export async function completeRoadmapIfAllDone(client: SupabaseClient, roadmapId
 - [ ] **Step 4: 테스트 실행 → 통과 확인**
 
 Run: `npx jest roadmaps.test.ts`
-Expected: PASS (8 tests — 5 from Task 5 + 3 new)
+Expected: PASS (10 tests — 7 from Task 5 + 3 new)
 
 - [ ] **Step 5: 마일스톤 상세 페이지를 구현하고, 완료 체크 시 자동 완료 처리를 호출한다**
 
@@ -1328,11 +1506,13 @@ Expected: PASS (8 tests — 5 from Task 5 + 3 new)
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { supabase } from '../../../lib/supabase';
-import { updateMilestone } from '../../../lib/milestones';
+import { useRequireAuth } from '../../../lib/useAuth';
+import { updateMilestone, deleteMilestone } from '../../../lib/milestones';
 import { completeRoadmapIfAllDone } from '../../../lib/roadmaps';
 import type { Milestone } from '../../../types/models';
 
 export default function MilestoneDetailPage() {
+  const userId = useRequireAuth();
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const [milestone, setMilestone] = useState<Milestone | null>(null);
@@ -1340,8 +1520,8 @@ export default function MilestoneDetailPage() {
   const [dueDate, setDueDate] = useState('');
 
   useEffect(() => {
+    if (!userId || !id) return;
     async function load() {
-      if (!id) return;
       const { data } = await supabase.from('milestones').select('*').eq('id', id).single();
       const row = data as Milestone;
       setMilestone(row);
@@ -1349,7 +1529,7 @@ export default function MilestoneDetailPage() {
       setDueDate(row?.due_date ?? '');
     }
     load();
-  }, [id]);
+  }, [userId, id]);
 
   if (!milestone) return null;
 
@@ -1368,12 +1548,28 @@ export default function MilestoneDetailPage() {
   async function saveEdits() {
     if (!milestone) return;
     await updateMilestone(supabase, milestone.id, { description, due_date: dueDate });
+    // App Router는 뒤로 이동 시 이전 화면을 캐시에서 그대로 보여줄 수 있어서,
+    // 방금 바뀐 마감일/지연 상태가 안 보일 수 있다 - 뒤로 가기 전에 캐시를 무효화한다.
+    router.refresh();
     router.back();
+  }
+
+  async function handleDelete() {
+    if (!milestone) return;
+    if (!confirm('이 마일스톤을 삭제할까요?')) return;
+    const roadmapId = milestone.roadmap_id;
+    await deleteMilestone(supabase, milestone.id);
+    router.replace(`/roadmap/${roadmapId}`);
   }
 
   return (
     <div className="mx-auto max-w-xl space-y-4 p-6">
-      <h1 className="text-xl font-bold">{milestone.title}</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl font-bold">{milestone.title}</h1>
+        <button className="text-sm text-red-600 underline" onClick={handleDelete}>
+          삭제
+        </button>
+      </div>
       <label className="flex items-center gap-2">
         <input type="checkbox" checked={milestone.status === 'done'} onChange={(e) => toggleDone(e.target.checked)} />
         완료
@@ -1401,15 +1597,17 @@ export default function MilestoneDetailPage() {
 - [ ] **Step 6: 수동 확인**
 
 Run: `npm run dev` → 체크박스로 완료 토글 시 상태가 `done`으로 바뀌는지, 마감일을
-수정하고 저장하면 로드맵 상세로 돌아가 지연 상태가 재계산되는지 확인. 로드맵의
-마지막 마일스톤까지 전부 체크한 뒤 홈으로 돌아가면 그 로드맵이 목록에서 사라지는지
-(Task 7에서 추가한 `active` 필터 때문에 `completed`로 전환된 로드맵은 안 보임) 확인
+수정하고 저장하면 로드맵 상세로 돌아가 지연 상태가 새로고침 없이도 바로 재계산돼
+보이는지(캐시 무효화 확인) 확인. 로드맵의 마지막 마일스톤까지 전부 체크한 뒤 홈으로
+돌아가면 그 로드맵이 목록에서 사라지는지(Task 7에서 추가한 `active` 필터 때문에
+`completed`로 전환된 로드맵은 안 보임) 확인. "삭제"를 누르면 확인창 뒤에 로드맵
+상세로 돌아가고 그 마일스톤이 목록에서 사라졌는지 확인
 
 - [ ] **Step 7: 커밋**
 
 ```bash
 git add app/milestone/\[id\]/page.tsx lib/roadmaps.ts __tests__/roadmaps.test.ts
-git commit -m "feat: add milestone detail page and auto-complete roadmap when all milestones are done"
+git commit -m "feat: add milestone detail page with delete, auth guard, and auto-complete roadmap"
 ```
 
 ---
@@ -1488,68 +1686,69 @@ export function computeNodePositions(count: number): NodePosition[] {
 Run: `npx jest timeline.test.ts`
 Expected: PASS (4 tests)
 
-- [ ] **Step 5: 로드맵 상세 페이지에 브레이크포인트별 두 가지 뷰를 추가한다** (좁은
-화면은 Task 9의 리스트를 유지하고, `sm` 이상에서만 경로형 뷰를 보여준다)
+- [ ] **Step 5: 로드맵 상세 페이지에 브레이크포인트별 두 가지 뷰를 추가한다** (Task 9의
+헤더 · 마일스톤 추가 폼 · 삭제 버튼은 그대로 두고, 맨 아래 `<ul className="mt-4
+space-y-2">...</ul>` 블록 **하나만** 아래 두 블록으로 교체한다)
 
 ```tsx
-// app/roadmap/[id]/page.tsx 의 렌더 부분을 다음으로 교체 (state/로딩 로직은 Task 9와 동일)
+// app/roadmap/[id]/page.tsx 상단 import에 추가
 import { computeNodePositions } from '../../../lib/timeline';
-// ...
+```
+
+```tsx
+// 컴포넌트 안, return 문 바로 위에 추가
 const positions = computeNodePositions(milestones.length);
 const pathHeight = 40 + milestones.length * 140 + 100;
-
-return (
-  <div className="mx-auto max-w-2xl p-6">
-    <h1 className="text-xl font-bold">{roadmap.title}</h1>
-    <p className="text-sm text-gray-600">
-      전체 진행률 {progress.percent}% ({progress.completedCount}/{progress.totalCount})
-    </p>
-
-    {/* 좁은 화면: 세로 리스트 */}
-    <ul className="mt-4 space-y-2 sm:hidden">
-      {milestones.map((milestone) => {
-        const status = milestoneStatus(milestone, now);
-        return (
-          <li key={milestone.id}>
-            <Link href={`/milestone/${milestone.id}`} className="block rounded-xl border p-3">
-              <p className="font-medium">{milestone.title}</p>
-              <p className={status === 'overdue' ? 'text-red-600' : 'text-gray-500'}>
-                {milestone.due_date} · {status}
-              </p>
-            </Link>
-          </li>
-        );
-      })}
-    </ul>
-
-    {/* 넓은 화면: 경로형 타임라인 */}
-    <div className="relative mt-4 hidden sm:block" style={{ height: pathHeight }}>
-      {milestones.map((milestone, index) => {
-        const pos = positions[index];
-        const status = milestoneStatus(milestone, now);
-        return (
-          <Link
-            key={milestone.id}
-            href={`/milestone/${milestone.id}`}
-            className="absolute flex -translate-x-1/2 flex-col items-center gap-1 text-center"
-            style={{ left: `${pos.xPercent * 100}%`, top: pos.y }}
-          >
-            <div
-              className={`flex h-14 w-14 items-center justify-center rounded-full font-semibold text-white ${
-                status === 'done' ? 'bg-green-500' : status === 'overdue' ? 'bg-red-500' : 'bg-gray-200 !text-gray-700'
-              }`}
-            >
-              {index + 1}
-            </div>
-            <span className="text-sm font-medium">{milestone.title}</span>
-            <span className="text-xs text-gray-500">{milestone.due_date}</span>
-          </Link>
-        );
-      })}
-    </div>
-  </div>
-);
 ```
+
+```tsx
+{/* 기존 <ul className="mt-4 space-y-2">...</ul> 를 아래 두 블록으로 교체 */}
+{/* 좁은 화면: 세로 리스트 */}
+<ul className="mt-4 space-y-2 sm:hidden">
+  {milestones.map((milestone) => {
+    const status = milestoneStatus(milestone, now);
+    return (
+      <li key={milestone.id}>
+        <Link href={`/milestone/${milestone.id}`} className="block rounded-xl border p-3">
+          <p className="font-medium">{milestone.title}</p>
+          <p className={status === 'overdue' ? 'text-red-600' : 'text-gray-500'}>
+            {milestone.due_date} · {status}
+          </p>
+        </Link>
+      </li>
+    );
+  })}
+</ul>
+
+{/* 넓은 화면: 경로형 타임라인 */}
+<div className="relative mt-4 hidden sm:block" style={{ height: pathHeight }}>
+  {milestones.map((milestone, index) => {
+    const pos = positions[index];
+    const status = milestoneStatus(milestone, now);
+    return (
+      <Link
+        key={milestone.id}
+        href={`/milestone/${milestone.id}`}
+        className="absolute flex -translate-x-1/2 flex-col items-center gap-1 text-center"
+        style={{ left: `${pos.xPercent * 100}%`, top: pos.y }}
+      >
+        <div
+          className={`flex h-14 w-14 items-center justify-center rounded-full font-semibold text-white ${
+            status === 'done' ? 'bg-green-500' : status === 'overdue' ? 'bg-red-500' : 'bg-gray-200 !text-gray-700'
+          }`}
+        >
+          {index + 1}
+        </div>
+        <span className="text-sm font-medium">{milestone.title}</span>
+        <span className="text-xs text-gray-500">{milestone.due_date}</span>
+      </Link>
+    );
+  })}
+</div>
+```
+
+교체 후 파일 전체 구조는: 헤더(제목+삭제 버튼) → 진행률 → 마일스톤 추가 폼 →
+(좁은 화면용 리스트 / 넓은 화면용 타임라인, 두 블록 다 유지) 순서가 된다.
 
 - [ ] **Step 6: 수동 확인**
 
@@ -1745,20 +1944,17 @@ Expected: PASS (2 tests)
 // app/(dashboard)/page.tsx 상단에 추가
 import { recordCheckin, getTodayStreak } from '../../lib/checkins';
 // ...
+// 아래 두 함수는 컴포넌트 상단의 `const userId = useRequireAuth();` 를 그대로 재사용한다
 const [streak, setStreak] = useState(0);
 useEffect(() => {
+  if (!userId) return;
   async function loadStreak() {
-    const { data: userData } = await supabase.auth.getUser();
-    const userId = userData.user?.id;
-    if (!userId) return;
     setStreak(await getTodayStreak(supabase, userId, new Date()));
   }
   loadStreak();
-}, []);
+}, [userId]);
 
 async function handleCheckin() {
-  const { data: userData } = await supabase.auth.getUser();
-  const userId = userData.user?.id;
   if (!userId) return;
   setStreak(await recordCheckin(supabase, userId, new Date()));
 }
@@ -1789,6 +1985,7 @@ import { recordCheckin } from '../../../lib/checkins';
 
 ```tsx
 // app/milestone/[id]/page.tsx 의 toggleDone 함수를 다음으로 교체
+// (컴포넌트 상단의 `const userId = useRequireAuth();` 를 그대로 재사용한다)
 async function toggleDone(checked: boolean) {
   if (!milestone) return;
   const updated = await updateMilestone(supabase, milestone.id, {
@@ -1798,9 +1995,8 @@ async function toggleDone(checked: boolean) {
   setMilestone(updated);
   if (checked) {
     await completeRoadmapIfAllDone(supabase, milestone.roadmap_id);
-    const { data: userData } = await supabase.auth.getUser();
-    if (userData.user?.id) {
-      await recordCheckin(supabase, userData.user.id, new Date());
+    if (userId) {
+      await recordCheckin(supabase, userId, new Date());
     }
   }
 }
@@ -1827,9 +2023,12 @@ git commit -m "feat: add check-in recording, home streak display, and milestone-
 - Create: `lib/notifications.ts`
 - Create: `public/sw.js`
 - Create: `app/(dashboard)/settings/page.tsx`
+- Modify: `app/(dashboard)/layout.tsx` (Task 7에서 만든 파일 — 서비스 워커가 구독
+  갱신을 알려주면 새 구독을 저장하는 리스너를 붙인다)
 - Test: `__tests__/notifications.test.ts`
 
 **Interfaces:**
+- Consumes: `useRequireAuth` (Task 3)
 - Produces: `subscribeToPush(vapidPublicKey: string): Promise<PushSubscriptionJSON | null>`,
   `urlBase64ToUint8Array(base64String: string): Uint8Array`
 
@@ -1891,6 +2090,24 @@ self.addEventListener('push', (event) => {
     })
   );
 });
+
+// 브라우저가 내부적으로 구독을 갱신/만료시키면 이 이벤트가 발생한다. 서비스
+// 워커에는 사용자의 로그인 세션이 없어 직접 Supabase에 쓸 수 없으므로, 새
+// 구독을 열려있는 탭에 postMessage로 전달하고, 탭에 있는(로그인된) 클라이언트가
+// 대신 저장하게 한다.
+self.addEventListener('pushsubscriptionchange', (event) => {
+  event.waitUntil(
+    self.registration.pushManager
+      .subscribe(event.oldSubscription ? { applicationServerKey: event.oldSubscription.options.applicationServerKey, userVisibleOnly: true } : undefined)
+      .then((newSubscription) =>
+        self.clients.matchAll().then((clients) => {
+          clients.forEach((client) =>
+            client.postMessage({ type: 'PUSH_SUBSCRIPTION_CHANGED', subscription: newSubscription.toJSON() })
+          );
+        })
+      )
+  );
+});
 ```
 
 - [ ] **Step 4: 테스트 실행 → 통과 확인**
@@ -1906,18 +2123,18 @@ Expected: PASS (2 tests)
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '../../../lib/supabase';
+import { useRequireAuth } from '../../../lib/useAuth';
 import { subscribeToPush } from '../../../lib/notifications';
 
 const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY as string;
 
 export default function SettingsPage() {
+  const userId = useRequireAuth();
   const router = useRouter();
   const [reminderEnabled, setReminderEnabled] = useState(true);
 
   async function toggleReminder(value: boolean) {
     setReminderEnabled(value);
-    const { data: userData } = await supabase.auth.getUser();
-    const userId = userData.user?.id;
     if (!userId) return;
     const subscription = value ? await subscribeToPush(VAPID_PUBLIC_KEY) : null;
     await supabase
@@ -1948,18 +2165,66 @@ export default function SettingsPage() {
 }
 ```
 
-- [ ] **Step 6: 수동 확인**
+- [ ] **Step 6: 서비스 워커가 알려주는 구독 갱신을 홈 레이아웃에서 받아 저장한다**
+(로그인된 탭이 열려있을 때만 반영되는 MVP 수준의 대응 — Task 1 참고)
+
+```tsx
+// app/(dashboard)/layout.tsx 에 추가
+'use client';
+import { useEffect } from 'react';
+import Link from 'next/link';
+import type { ReactNode } from 'react';
+import { supabase } from '../../lib/supabase';
+
+export default function DashboardLayout({ children }: { children: ReactNode }) {
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return;
+    function handleMessage(event: MessageEvent) {
+      if (event.data?.type !== 'PUSH_SUBSCRIPTION_CHANGED') return;
+      supabase.auth.getUser().then(({ data }) => {
+        if (!data.user) return;
+        supabase
+          .from('notification_settings')
+          .upsert(
+            { user_id: data.user.id, push_subscription: event.data.subscription },
+            { onConflict: 'user_id' }
+          );
+      });
+    }
+    navigator.serviceWorker.addEventListener('message', handleMessage);
+    return () => navigator.serviceWorker.removeEventListener('message', handleMessage);
+  }, []);
+
+  return (
+    <div>
+      <nav className="flex gap-4 border-b p-4 text-sm">
+        <Link href="/">홈</Link>
+        <Link href="/dashboard">대시보드</Link>
+        <Link href="/coaching">AI 코칭</Link>
+        <Link href="/settings">설정</Link>
+      </nav>
+      {children}
+    </div>
+  );
+}
+```
+
+이 레이아웃 파일은 Task 1에서 `layout.tsx`라는 이름으로 이미 만든 것과 다른 파일이다
+— Task 7이 만든 `app/(dashboard)/layout.tsx`에 `'use client'`와 위 리스너를 추가하는
+것이며, 기존 `<nav>`는 그대로 둔다.
+
+- [ ] **Step 7: 수동 확인**
 
 Run: `npm run dev` (HTTPS 또는 `localhost`에서 실행 — Web Push는 보안 컨텍스트 필요) →
 알림 받기를 켰을 때 브라우저 알림 권한 요청이 뜨는지, 허용 후
 `notification_settings.push_subscription`이 채워지는지, 로그아웃이 로그인 페이지로
-보내는지 확인
+보내는지, 로그인 안 한 상태로 설정 페이지에 들어가면 로그인 페이지로 튕기는지 확인
 
-- [ ] **Step 7: 커밋**
+- [ ] **Step 8: 커밋**
 
 ```bash
-git add lib/notifications.ts __tests__/notifications.test.ts public/sw.js app/\(dashboard\)/settings/page.tsx
-git commit -m "feat: add web push subscription and settings page"
+git add lib/notifications.ts __tests__/notifications.test.ts public/sw.js app/\(dashboard\)/settings/page.tsx app/\(dashboard\)/layout.tsx
+git commit -m "feat: add web push subscription, settings page, and subscription-refresh handling"
 ```
 
 ---
@@ -1972,7 +2237,7 @@ git commit -m "feat: add web push subscription and settings page"
 - Test: `__tests__/dashboard.test.ts`
 
 **Interfaces:**
-- Consumes: `calculateProgress`, `ProgressSummary` (Task 4), `Roadmap`, `Milestone` (Task 2)
+- Consumes: `calculateProgress`, `ProgressSummary` (Task 4), `Roadmap`, `Milestone` (Task 2), `useRequireAuth` (Task 3)
 - Produces: `summarizeDashboard(entries): { roadmaps: { roadmap: Roadmap; progress: ProgressSummary }[]; overallPercent: number }`
 
 - [ ] **Step 1: 실패하는 테스트를 작성한다**
@@ -2041,18 +2306,18 @@ Expected: PASS (2 tests)
 'use client';
 import { useEffect, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
+import { useRequireAuth } from '../../../lib/useAuth';
 import { listRoadmaps } from '../../../lib/roadmaps';
 import { listMilestones } from '../../../lib/milestones';
 import { summarizeDashboard, DashboardSummary } from '../../../lib/dashboard';
 
 export default function DashboardPage() {
+  const userId = useRequireAuth();
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
 
   useEffect(() => {
+    if (!userId) return;
     async function load() {
-      const { data: userData } = await supabase.auth.getUser();
-      const userId = userData.user?.id;
-      if (!userId) return;
       const roadmaps = await listRoadmaps(supabase, userId);
       const entries = await Promise.all(
         roadmaps.map(async (roadmap) => ({ roadmap, milestones: await listMilestones(supabase, roadmap.id) }))
@@ -2060,7 +2325,7 @@ export default function DashboardPage() {
       setSummary(summarizeDashboard(entries));
     }
     load();
-  }, []);
+  }, [userId]);
 
   if (!summary) return null;
 
@@ -2267,6 +2532,9 @@ serve(async (req) => {
     }))
   );
   if (milestonesError) {
+    // 마일스톤 insert가 실패하면 방금 만든 로드맵만 덩그러니 남는다(마일스톤 0개짜리
+    // 고아 로드맵) - 실패를 알리기 전에 롤백 삼아 지운다.
+    await supabase.from('roadmaps').delete().eq('id', roadmap.id);
     return new Response(JSON.stringify({ error: milestonesError.message }), { status: 500 });
   }
 
@@ -2285,7 +2553,9 @@ curl -X POST "$SUPABASE_URL/functions/v1/generate-roadmap" \
   -d '{"user_id":"<test-user-id>","title":"3개월 안에 10km 마라톤 완주하기"}'
 ```
 
-Expected: `{"roadmap_id": "..."}` 응답과 함께 `roadmaps`/`milestones`에 행 생성 확인
+Expected: `{"roadmap_id": "..."}` 응답과 함께 `roadmaps`/`milestones`에 행 생성 확인.
+`milestones` insert를 일부러 실패시켜보고(예: 마이그레이션 전에 호출) `roadmaps`에도
+고아 행이 안 남고 같이 롤백되는지 확인
 
 - [ ] **Step 7: 커밋**
 
@@ -2313,8 +2583,6 @@ const [aiDescription, setAiDescription] = useState('');
 const [aiError, setAiError] = useState<string | null>(null);
 
 async function handleAiSubmit() {
-  const { data: userData } = await supabase.auth.getUser();
-  const userId = userData.user?.id;
   if (!userId || !title) return;
   const { data, error } = await supabase.functions.invoke('generate-roadmap', {
     body: { user_id: userId, title, description: aiDescription },
@@ -2819,7 +3087,7 @@ git commit -m "feat: add scheduled deadline and check-in reminder edge function"
 - Test: `__tests__/coaching.test.ts`
 
 **Interfaces:**
-- Consumes: `CoachingMessage` (Task 2), `makeFakeClient` (Task 5)
+- Consumes: `CoachingMessage` (Task 2), `makeFakeClient` (Task 5), `useRequireAuth` (Task 3)
 - Produces: `listMessages(client, userId): Promise<CoachingMessage[]>`, `markRead(client, messageId): Promise<void>`
 
 - [ ] **Step 1: 실패하는 테스트를 작성한다**
@@ -2890,21 +3158,21 @@ Expected: PASS (3 tests)
 'use client';
 import { useEffect, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
+import { useRequireAuth } from '../../../lib/useAuth';
 import { listMessages, markRead } from '../../../lib/coaching';
 import type { CoachingMessage } from '../../../types/models';
 
 export default function CoachingInboxPage() {
+  const userId = useRequireAuth();
   const [messages, setMessages] = useState<CoachingMessage[]>([]);
 
   useEffect(() => {
+    if (!userId) return;
     async function load() {
-      const { data: userData } = await supabase.auth.getUser();
-      const userId = userData.user?.id;
-      if (!userId) return;
       setMessages(await listMessages(supabase, userId));
     }
     load();
-  }, []);
+  }, [userId]);
 
   async function handleOpen(message: CoachingMessage) {
     if (message.read_at) return;

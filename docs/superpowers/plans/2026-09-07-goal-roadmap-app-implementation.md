@@ -63,7 +63,7 @@ lib/
   supabase.ts                        # Supabase 브라우저 클라이언트
   auth.ts                            # validateEmail/validatePassword
   progress.ts                        # calculateProgress/milestoneStatus (순수 함수)
-  roadmaps.ts                        # 로드맵 CRUD
+  roadmaps.ts                        # 로드맵 CRUD + completeRoadmapIfAllDone
   milestones.ts                      # 마일스톤 CRUD
   timeline.ts                        # computeNodePositions (순수 함수, % 좌표)
   streak.ts                          # computeStreak (순수 함수)
@@ -100,7 +100,7 @@ supabase/
       select.test.ts                 # Deno test
     send-reminders/
       index.ts                       # 리마인더 Web Push 발송 (스케줄)
-      schedule.ts                    # isReminderDue (순수 함수)
+      schedule.ts                    # isReminderDue, selectMilestonesDueTomorrow (순수 함수)
       schedule.test.ts               # Deno test
 ```
 
@@ -995,9 +995,10 @@ export default function HomePage() {
       const userId = userData.user?.id;
       if (!userId) return;
       const roadmaps = await listRoadmaps(supabase, userId);
+      const activeRoadmaps = roadmaps.filter((r) => r.status === 'active');
       const now = new Date();
       const withProgress = await Promise.all(
-        roadmaps.map(async (roadmap) => {
+        activeRoadmaps.map(async (roadmap) => {
           const milestones = await listMilestones(supabase, roadmap.id);
           const progress = calculateProgress(milestones);
           const upcoming = milestones
@@ -1018,7 +1019,8 @@ export default function HomePage() {
 
   return (
     <div className="mx-auto max-w-3xl p-6">
-      <h1 className="mb-4 text-2xl font-bold">내 목표</h1>
+      <h1 className="text-2xl font-bold">내 목표</h1>
+      <p className="mb-4 text-sm text-gray-500">{rows.length}개 진행 중 (완료된 로드맵은 대시보드에서 확인)</p>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         {rows.map((row) => (
           <div key={row.roadmap.id} className="rounded-2xl border p-4">
@@ -1051,7 +1053,9 @@ export default function HomePage() {
 - [ ] **Step 3: 수동 확인**
 
 Run: `npm run dev` → 로그인 후 홈 페이지에서 로드맵들이 진행률과 함께 카드로 보이는지,
-브라우저 폭을 줄였을 때(모바일 폭) 1열, 늘렸을 때(`sm` 이상) 2열로 바뀌는지 확인
+브라우저 폭을 줄였을 때(모바일 폭) 1열, 늘렸을 때(`sm` 이상) 2열로 바뀌는지 확인.
+Supabase Studio에서 로드맵 하나의 `status`를 수동으로 `completed`로 바꾸고 새로고침하면
+그 로드맵이 홈 목록에서 사라지는지도 확인(자동 전환 로직은 Task 10에서 붙인다)
 
 - [ ] **Step 4: 커밋**
 
@@ -1249,15 +1253,74 @@ git commit -m "feat: add roadmap detail page with milestone list view"
 
 ---
 
-### Task 10: 마일스톤 상세 페이지 — 체크/메모/마감일 수정
+### Task 10: 마일스톤 상세 페이지 — 체크/메모/마감일 수정 + 로드맵 자동 완료 처리
 
 **Files:**
 - Create: `app/milestone/[id]/page.tsx`
+- Modify: `lib/roadmaps.ts` (Task 5에서 만든 파일에 함수를 추가한다)
+- Test: `__tests__/roadmaps.test.ts` (Task 5에서 만든 파일에 케이스를 추가한다)
 
 **Interfaces:**
-- Consumes: `updateMilestone` (Task 6)
+- Consumes: `updateMilestone`, `listMilestones` (Task 6), `makeFakeClient` (Task 5)
+- Produces: `completeRoadmapIfAllDone(client, roadmapId): Promise<void>`
 
-- [ ] **Step 1: 페이지를 구현한다**
+- [ ] **Step 1: 실패하는 테스트를 추가한다** (`lib/roadmaps.ts`에 로드맵을 자동으로
+완료 처리하는 함수)
+
+```ts
+// __tests__/roadmaps.test.ts 에 추가
+import { completeRoadmapIfAllDone } from '../lib/roadmaps';
+
+test('completeRoadmapIfAllDone marks the roadmap completed when every milestone is done', async () => {
+  const client = makeFakeClient([
+    { data: [{ status: 'done' }, { status: 'done' }], error: null }, // listMilestones
+    { data: null, error: null }, // update
+  ]);
+  await completeRoadmapIfAllDone(client, 'r1');
+  expect(client.from).toHaveBeenCalledWith('roadmaps');
+});
+
+test('completeRoadmapIfAllDone does nothing when a milestone is still pending', async () => {
+  const client = makeFakeClient([
+    { data: [{ status: 'done' }, { status: 'pending' }], error: null }, // listMilestones
+  ]);
+  await completeRoadmapIfAllDone(client, 'r1');
+  expect(client.from).toHaveBeenCalledTimes(1); // only the listMilestones call
+});
+
+test('completeRoadmapIfAllDone does nothing for a roadmap with no milestones', async () => {
+  const client = makeFakeClient([{ data: [], error: null }]);
+  await completeRoadmapIfAllDone(client, 'r1');
+  expect(client.from).toHaveBeenCalledTimes(1);
+});
+```
+
+- [ ] **Step 2: 테스트 실행 → 실패 확인**
+
+Run: `npx jest roadmaps.test.ts`
+Expected: FAIL with "completeRoadmapIfAllDone is not a function"
+
+- [ ] **Step 3: `lib/roadmaps.ts`에 함수를 추가한다**
+
+```ts
+// lib/roadmaps.ts 에 추가
+import { listMilestones } from './milestones';
+
+export async function completeRoadmapIfAllDone(client: SupabaseClient, roadmapId: string): Promise<void> {
+  const milestones = await listMilestones(client, roadmapId);
+  const allDone = milestones.length > 0 && milestones.every((m) => m.status === 'done');
+  if (!allDone) return;
+  const { error } = await client.from('roadmaps').update({ status: 'completed' }).eq('id', roadmapId);
+  if (error) throw error;
+}
+```
+
+- [ ] **Step 4: 테스트 실행 → 통과 확인**
+
+Run: `npx jest roadmaps.test.ts`
+Expected: PASS (8 tests — 5 from Task 5 + 3 new)
+
+- [ ] **Step 5: 마일스톤 상세 페이지를 구현하고, 완료 체크 시 자동 완료 처리를 호출한다**
 
 ```tsx
 // app/milestone/[id]/page.tsx
@@ -1266,6 +1329,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { supabase } from '../../../lib/supabase';
 import { updateMilestone } from '../../../lib/milestones';
+import { completeRoadmapIfAllDone } from '../../../lib/roadmaps';
 import type { Milestone } from '../../../types/models';
 
 export default function MilestoneDetailPage() {
@@ -1296,6 +1360,9 @@ export default function MilestoneDetailPage() {
       completed_at: checked ? new Date().toISOString() : null,
     });
     setMilestone(updated);
+    if (checked) {
+      await completeRoadmapIfAllDone(supabase, milestone.roadmap_id);
+    }
   }
 
   async function saveEdits() {
@@ -1331,16 +1398,18 @@ export default function MilestoneDetailPage() {
 }
 ```
 
-- [ ] **Step 2: 수동 확인**
+- [ ] **Step 6: 수동 확인**
 
 Run: `npm run dev` → 체크박스로 완료 토글 시 상태가 `done`으로 바뀌는지, 마감일을
-수정하고 저장하면 로드맵 상세로 돌아가 지연 상태가 재계산되는지 확인
+수정하고 저장하면 로드맵 상세로 돌아가 지연 상태가 재계산되는지 확인. 로드맵의
+마지막 마일스톤까지 전부 체크한 뒤 홈으로 돌아가면 그 로드맵이 목록에서 사라지는지
+(Task 7에서 추가한 `active` 필터 때문에 `completed`로 전환된 로드맵은 안 보임) 확인
 
-- [ ] **Step 3: 커밋**
+- [ ] **Step 7: 커밋**
 
 ```bash
-git add app/milestone/\[id\]/page.tsx
-git commit -m "feat: add milestone detail page with check/edit"
+git add app/milestone/\[id\]/page.tsx lib/roadmaps.ts __tests__/roadmaps.test.ts
+git commit -m "feat: add milestone detail page and auto-complete roadmap when all milestones are done"
 ```
 
 ---
@@ -1587,11 +1656,13 @@ git commit -m "feat: add account-wide streak calculation"
 
 ---
 
-### Task 13: 체크인 기록/조회 + 홈 페이지 스트릭 표시
+### Task 13: 체크인 기록/조회 + 홈 페이지 스트릭 표시 + 마일스톤 완료를 체크인으로 인정
 
 **Files:**
 - Create: `lib/checkins.ts`
 - Modify: `app/(dashboard)/page.tsx`
+- Modify: `app/milestone/[id]/page.tsx` (Task 10에서 만든 파일 — 마일스톤을 완료로
+  체크하면 그날의 체크인도 함께 기록한다)
 - Test: `__tests__/checkins.test.ts`
 
 **Interfaces:**
@@ -1693,10 +1764,10 @@ async function handleCheckin() {
 }
 ```
 
-JSX 헤더 영역에 추가:
+Task 7에서 만든 헤더(`<h1>내 목표</h1>` + 진행 중 개수 `<p>`)를 다음으로 교체한다:
 
 ```tsx
-<div className="mb-4 flex items-center justify-between">
+<div className="flex items-center justify-between">
   <h1 className="text-2xl font-bold">내 목표</h1>
   <div className="flex items-center gap-3">
     <span className="rounded-full bg-orange-100 px-3 py-1 text-sm font-semibold text-orange-700">{streak}일 연속</span>
@@ -1705,18 +1776,47 @@ JSX 헤더 영역에 추가:
     </button>
   </div>
 </div>
+<p className="mb-4 text-sm text-gray-500">{rows.length}개 진행 중 (완료된 로드맵은 대시보드에서 확인)</p>
 ```
 
-- [ ] **Step 6: 수동 확인**
+- [ ] **Step 6: 마일스톤을 완료로 체크하는 것도 그날의 체크인으로 인정되게 연결한다**
+(스펙: "그날 뭐라도 체크했는지"에는 마일스톤 완료도 포함된다)
+
+```tsx
+// app/milestone/[id]/page.tsx — import에 추가
+import { recordCheckin } from '../../../lib/checkins';
+```
+
+```tsx
+// app/milestone/[id]/page.tsx 의 toggleDone 함수를 다음으로 교체
+async function toggleDone(checked: boolean) {
+  if (!milestone) return;
+  const updated = await updateMilestone(supabase, milestone.id, {
+    status: checked ? 'done' : 'pending',
+    completed_at: checked ? new Date().toISOString() : null,
+  });
+  setMilestone(updated);
+  if (checked) {
+    await completeRoadmapIfAllDone(supabase, milestone.roadmap_id);
+    const { data: userData } = await supabase.auth.getUser();
+    if (userData.user?.id) {
+      await recordCheckin(supabase, userData.user.id, new Date());
+    }
+  }
+}
+```
+
+- [ ] **Step 7: 수동 확인**
 
 Run: `npm run dev` → "오늘 체크인" 버튼을 누르면 스트릭 숫자가 올라가고, 페이지를
-새로고침해도 유지되는지 확인
+새로고침해도 유지되는지 확인. 체크인을 하지 않은 상태에서 마일스톤 하나를 완료
+처리한 뒤 홈으로 돌아오면 스트릭이 마찬가지로 올라가 있는지 확인
 
-- [ ] **Step 7: 커밋**
+- [ ] **Step 8: 커밋**
 
 ```bash
-git add lib/checkins.ts __tests__/checkins.test.ts app/\(dashboard\)/page.tsx
-git commit -m "feat: add check-in recording and home streak display"
+git add lib/checkins.ts __tests__/checkins.test.ts app/\(dashboard\)/page.tsx app/milestone/\[id\]/page.tsx
+git commit -m "feat: add check-in recording, home streak display, and milestone-as-checkin linkage"
 ```
 
 ---
@@ -2034,6 +2134,18 @@ Deno.test('throws when a milestone is missing due_date', () => {
   const raw = JSON.stringify([{ title: 'only title' }]);
   assertThrows(() => parseRoadmapResponse(raw), Error, 'missing title or due_date');
 });
+
+Deno.test('sorts milestones by due_date before assigning order_index, regardless of response order', () => {
+  const raw = JSON.stringify([
+    { title: '3km 완주', due_date: '2026-10-15' },
+    { title: '1km 완주', due_date: '2026-10-01' },
+  ]);
+  const result = parseRoadmapResponse(raw);
+  assertEquals(result, [
+    { title: '1km 완주', due_date: '2026-10-01', order_index: 0 },
+    { title: '3km 완주', due_date: '2026-10-15', order_index: 1 },
+  ]);
+});
 ```
 
 - [ ] **Step 2: 테스트 실행 → 실패 확인**
@@ -2061,7 +2173,7 @@ export function parseRoadmapResponse(rawText: string): ParsedMilestone[] {
   if (!Array.isArray(json)) {
     throw new Error('AI response must be a JSON array of milestones');
   }
-  return json.map((item, index) => {
+  const withoutOrder = json.map((item, index) => {
     if (
       typeof item !== 'object' ||
       item === null ||
@@ -2073,16 +2185,21 @@ export function parseRoadmapResponse(rawText: string): ParsedMilestone[] {
     return {
       title: (item as Record<string, string>).title,
       due_date: (item as Record<string, string>).due_date,
-      order_index: index,
     };
   });
+  // The model isn't guaranteed to return milestones in chronological order;
+  // sort by due_date so order_index (and the timeline it drives) is always
+  // date-ordered regardless of response order.
+  return withoutOrder
+    .sort((a, b) => a.due_date.localeCompare(b.due_date))
+    .map((m, index) => ({ ...m, order_index: index }));
 }
 ```
 
 - [ ] **Step 4: 테스트 실행 → 통과 확인**
 
 Run: `deno test supabase/functions/generate-roadmap/parse.test.ts`
-Expected: PASS (3 tests)
+Expected: PASS (4 tests)
 
 - [ ] **Step 5: 엣지 함수 핸들러를 작성한다**
 
@@ -2100,7 +2217,8 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 serve(async (req) => {
   const { user_id, title, description } = await req.json();
 
-  const prompt = `사용자의 목표: "${title}"\n추가 설명: "${description ?? ''}"\n이 목표를 달성하기 위한 마일스톤을 5~8개, 각 마일스톤의 title과 due_date(YYYY-MM-DD, 오늘부터 합리적인 간격)로 구성된 JSON 배열로만 응답해. 다른 설명 텍스트는 포함하지 마.`;
+  const today = new Date().toISOString().slice(0, 10);
+  const prompt = `오늘 날짜: ${today}\n사용자의 목표: "${title}"\n추가 설명: "${description ?? ''}"\n이 목표를 달성하기 위한 마일스톤을 5~8개, 각 마일스톤의 title과 due_date(YYYY-MM-DD, 위 오늘 날짜를 기준으로 합리적인 간격을 두고 이후 날짜로)로 구성된 JSON 배열로만 응답해. 다른 설명 텍스트는 포함하지 마.`;
 
   const aiResponse = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
@@ -2474,7 +2592,7 @@ git commit -m "feat: add scheduled coaching edge function with web push"
 
 ---
 
-### Task 19: Edge Function `send-reminders` — 리마인더 스케줄 발송
+### Task 19: Edge Function `send-reminders` — 마감일 임박 알림 + 체크인 유도 알림
 
 **Files:**
 - Create: `supabase/functions/send-reminders/schedule.ts`
@@ -2482,7 +2600,8 @@ git commit -m "feat: add scheduled coaching edge function with web push"
 - Create: `supabase/functions/send-reminders/index.ts`
 
 **Interfaces:**
-- Produces: `isReminderDue(reminderTime: string, now: Date, windowMinutes: number): boolean`
+- Produces: `isReminderDue(reminderTime: string, now: Date, windowMinutes: number): boolean`,
+  `selectMilestonesDueTomorrow(milestones, now): MilestoneDueSoon[]`
 
 - [ ] **Step 1: 실패하는 Deno 테스트를 작성한다**
 
@@ -2526,15 +2645,77 @@ export function isReminderDue(reminderTime: string, now: Date, windowMinutes: nu
 Run: `deno test supabase/functions/send-reminders/schedule.test.ts`
 Expected: PASS (3 tests)
 
-- [ ] **Step 5: 엣지 함수 핸들러를 작성한다** (15분마다 실행되어, 리마인더 시간
-창에 들어온 사용자 중 오늘 아직 체크인하지 않은 사람에게만 Web Push를 보낸다)
+- [ ] **Step 5: `selectMilestonesDueTomorrow`에 대한 실패하는 테스트를 추가한다**
+(스펙 기능 7번의 "마감일 임박 알림" — 내일 마감인 미완료 마일스톤을 골라낸다)
+
+```ts
+// supabase/functions/send-reminders/schedule.test.ts 에 추가
+import { selectMilestonesDueTomorrow } from './schedule.ts';
+
+Deno.test('selects a milestone whose due_date is exactly tomorrow', () => {
+  const result = selectMilestonesDueTomorrow(
+    [{ id: 'm1', title: '5km 완주', due_date: '2026-09-08', status: 'pending' }],
+    new Date('2026-09-07T09:00:00')
+  );
+  assertEquals(result, [{ id: 'm1', title: '5km 완주', due_date: '2026-09-08', status: 'pending' }]);
+});
+
+Deno.test('excludes a milestone that is already done', () => {
+  const result = selectMilestonesDueTomorrow(
+    [{ id: 'm1', title: '5km 완주', due_date: '2026-09-08', status: 'done' }],
+    new Date('2026-09-07T09:00:00')
+  );
+  assertEquals(result, []);
+});
+
+Deno.test('excludes a milestone due further out than tomorrow', () => {
+  const result = selectMilestonesDueTomorrow(
+    [{ id: 'm1', title: '5km 완주', due_date: '2026-09-10', status: 'pending' }],
+    new Date('2026-09-07T09:00:00')
+  );
+  assertEquals(result, []);
+});
+```
+
+- [ ] **Step 6: 테스트 실행 → 실패 확인**
+
+Run: `deno test supabase/functions/send-reminders/schedule.test.ts`
+Expected: FAIL — `selectMilestonesDueTomorrow` is not exported
+
+- [ ] **Step 7: `selectMilestonesDueTomorrow`를 구현한다**
+
+```ts
+// supabase/functions/send-reminders/schedule.ts 에 추가
+export interface MilestoneDueSoon {
+  id: string;
+  title: string;
+  due_date: string;
+  status: string;
+}
+
+export function selectMilestonesDueTomorrow<T extends MilestoneDueSoon>(milestones: T[], now: Date): T[] {
+  const tomorrow = new Date(now);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowStr = tomorrow.toISOString().slice(0, 10);
+  return milestones.filter((m) => m.status !== 'done' && m.due_date === tomorrowStr);
+}
+```
+
+- [ ] **Step 8: 테스트 실행 → 통과 확인**
+
+Run: `deno test supabase/functions/send-reminders/schedule.test.ts`
+Expected: PASS (6 tests total)
+
+- [ ] **Step 9: 엣지 함수 핸들러를 작성한다** (15분마다 실행되어, 리마인더 시간
+창에 들어온 사용자에게 두 알림을 함께 확인해서 보낸다: (a) 내일 마감인 미완료
+마일스톤이 있으면 "마감일 임박", (b) 오늘 아직 체크인하지 않았으면 "체크인 유도")
 
 ```ts
 // supabase/functions/send-reminders/index.ts
 import { serve } from 'https://deno.land/std@0.208.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import webpush from 'npm:web-push@3.6.7';
-import { isReminderDue } from './schedule.ts';
+import { isReminderDue, selectMilestonesDueTomorrow } from './schedule.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -2563,6 +2744,29 @@ serve(async () => {
 
   let sent = 0;
   for (const row of due) {
+    // (a) 마감일 임박: 내일 마감인 이 사용자의 미완료 마일스톤이 있으면 알림
+    const { data: userMilestones } = await supabase
+      .from('milestones')
+      .select('id, title, due_date, status, roadmaps!inner(user_id)')
+      .eq('roadmaps.user_id', row.user_id)
+      .neq('status', 'done');
+    const dueSoon = selectMilestonesDueTomorrow(userMilestones ?? [], now);
+    if (dueSoon.length > 0) {
+      try {
+        await webpush.sendNotification(
+          row.push_subscription,
+          JSON.stringify({
+            title: '마감일 임박',
+            body: `"${dueSoon[0].title}" 마감이 내일이에요. 오늘 마무리해볼까요?`,
+          })
+        );
+        sent++;
+      } catch (_err) {
+        // 구독 만료 등 - MVP 범위에서는 무시
+      }
+    }
+
+    // (b) 체크인 유도: 오늘 아직 체크인하지 않았으면 알림
     const { data: checkin } = await supabase
       .from('habit_checkins')
       .select('id')
@@ -2585,22 +2789,24 @@ serve(async () => {
 });
 ```
 
-- [ ] **Step 6: 배포하고 15분마다 실행되도록 스케줄을 등록한다**
+- [ ] **Step 10: 배포하고 15분마다 실행되도록 스케줄을 등록한다**
 
 ```bash
 supabase functions deploy send-reminders
 supabase functions schedule send-reminders --cron "*/15 * * * *"
 ```
 
-수동 확인: `notification_settings.reminder_time`을 현재 시각 근처로 설정한 뒤
-`supabase functions invoke send-reminders`를 직접 호출해, 오늘 체크인하지 않은
-계정에만 알림이 오고 이미 체크인한 계정은 건너뛰는지 확인
+수동 확인: (1) 마감일을 내일로 설정한 미완료 마일스톤을 만든 뒤
+`supabase functions invoke send-reminders`를 직접 호출해 "마감일 임박" 알림이
+오는지, (2) `notification_settings.reminder_time`을 현재 시각 근처로 설정한 뒤
+오늘 체크인하지 않은 계정에만 "오늘의 체크인" 알림이 오고 이미 체크인한 계정은
+건너뛰는지 확인
 
-- [ ] **Step 7: 커밋**
+- [ ] **Step 11: 커밋**
 
 ```bash
 git add supabase/functions/send-reminders
-git commit -m "feat: add scheduled reminder edge function with web push"
+git commit -m "feat: add scheduled deadline and check-in reminder edge function"
 ```
 
 ---

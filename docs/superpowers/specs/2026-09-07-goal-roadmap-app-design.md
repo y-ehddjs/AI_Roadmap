@@ -84,6 +84,16 @@
    완료 처리하면 그 즉시 오늘의 체크인으로도 기록된다.
 9. AI 코칭 — 마일스톤 지연(마감일 경과) 감지 시 자동으로 푸시 + 인앱 메시지로 개입
    (프로액티브, 사용자가 요청하지 않아도 발동)
+10. 로드맵 공개 공유 — 로드맵마다 `is_public` 토글이 있고(기본값 비공개), 켜면
+    로그인 없이도 접근 가능한 읽기 전용 링크(`/r/[id]`)가 생긴다. 공개 화면에는
+    수정/삭제/마일스톤 추가 같은 편집 UI는 없고 진행률·타임라인만 보여준다.
+11. 마일스톤 응원(하이파이브) — 공개 로드맵의 마일스톤에 한해, 로그인한 다른
+    사용자가 하이파이브를 남길 수 있다. 한 사용자는 같은 마일스톤에 한 번만
+    남기고 다시 누르면 취소되는 토글 방식이다.
+12. 리더보드 — 설정에서 "리더보드에 표시"를 켠 사용자들만 골라 계정 통합
+    스트릭(8번) 기준으로 순위를 보여준다. 이메일을 그대로 노출하지 않기 위해
+    가입 시 자동 생성되는 닉네임(`profiles.display_name`)을 쓰고, 사용자가
+    설정에서 바꿀 수 있다.
 
 ## 화면 구성
 
@@ -94,16 +104,23 @@
 5. 마일스톤 상세 — 체크, 메모, 마감일 수정
 6. 진행률 대시보드 — 전체 로드맵 요약
 7. AI 코칭 메시지함 — 프로액티브 메시지 히스토리
-8. 설정 — 알림 on/off, 리마인더 시간(`reminder_time`) 변경, 계정 관리. 페이지를
-   열면 DB에 저장된 현재 값을 불러와 체크박스/시간 입력에 반영한다(항상 켜진
-   상태로 시작하지 않는다).
+8. 설정 — 알림 on/off, 리마인더 시간(`reminder_time`) 변경, 닉네임 변경, "리더보드에
+   표시" 토글, 계정 관리. 페이지를 열면 DB에 저장된 현재 값을 불러와 반영한다
+   (항상 켜진 상태로 시작하지 않는다).
+9. 공개 로드맵 보기 (`/r/[id]`) — 로그인 여부와 무관하게 접근 가능한 읽기 전용
+   화면. 진행률과 타임라인만 보여주고, 마일스톤마다 하이파이브 버튼 표시.
+10. 리더보드 — 리더보드에 표시하기로 한 사용자들의 스트릭 순위.
 
 ## 데이터 모델 초안
 
 - **users** (Supabase Auth 기본 제공: id, email)
+- **profiles**: id, user_id(FK, unique), display_name, show_on_leaderboard(boolean,
+  기본 false), created_at. `notification_settings`와 마찬가지로 가입 시 트리거가
+  기본 행을 만든다(닉네임 기본값은 이메일의 `@` 앞부분).
 - **roadmaps**: id, user_id(FK), title, description, source(`ai`|`manual`),
   status(`active`|`completed`|`archived`; 모든 마일스톤이 `done`이 되면 클라이언트가
-  자동으로 `completed`로 갱신, `archived`는 MVP 범위 밖), created_at
+  자동으로 `completed`로 갱신, `archived`는 MVP 범위 밖), is_public(boolean, 기본
+  false — 켜면 로그인 없이 `/r/[id]`로 조회 가능), created_at
 - **milestones**: id, roadmap_id(FK), title, description, due_date, order_index,
   status(`pending`|`done`|`overdue`), completed_at. 조회 시 정렬은 `due_date`가
   기준이고 `order_index`는 같은 날짜인 마일스톤들의 동점 처리(입력 순서 유지)용
@@ -113,6 +130,10 @@
   (로드맵 무관, 계정 전체 통합 스트릭)
 - **coaching_messages**: id, user_id(FK), roadmap_id(FK),
   trigger_type(`delay`), message, created_at, read_at
+- **milestone_reactions**: id, milestone_id(FK), user_id(FK), created_at
+  (user_id+milestone_id 유니크 — 같은 마일스톤에 한 사용자가 하나만 남기고,
+  다시 누르면 삭제되는 토글). 공개(`is_public=true`) 로드맵의 마일스톤에만
+  달 수 있다.
 - **notification_settings**: id, user_id(FK), reminder_enabled, reminder_time,
   push_subscription (jsonb, 브라우저 Web Push 구독 정보. 코칭/리마인더 발송에
   필요해 계획 단계에서 추가). 가입 직후에는 세션이 없어 클라이언트가 RLS를 통과해
@@ -129,6 +150,11 @@
 - 마일스톤 마감일 수정 시 `overdue` 상태 재계산
 - 마일스톤 편집 후 뒤로 이동할 때 Next.js 클라이언트 라우터 캐시 때문에 이전
   화면이 최신 상태를 안 보여줄 수 있어, 캐시를 무효화한 뒤 이동한다
+- 비공개 로드맵의 `/r/[id]` 링크로 접근하면(주인이 다시 비공개로 돌렸거나 원래
+  없는 id) "찾을 수 없거나 비공개인 로드맵" 안내만 보여주고 어떤 데이터도
+  새어나가지 않게 한다
+- 하이파이브는 같은 사용자가 같은 마일스톤에 중복으로 못 남기게 유니크 제약으로
+  막고, 이미 눌렀으면 버튼이 눌린 상태로 보여 다시 누르면 취소된다
 
 ## 테스트 방침
 

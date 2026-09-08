@@ -23,11 +23,11 @@
 
 ## 검토한 접근 방식
 
-1. **(채택) Next.js(React) + Supabase + Claude API** — 웹 개발 배경과 바로 맞고,
+1. **(채택) Next.js(React) + Supabase + Gemini API** — 웹 개발 배경과 바로 맞고,
    Supabase의 관계형(Postgres) 구조가 로드맵/마일스톤의 계층·순서 데이터에 자연스러움.
    앱스토어 배포 없이 링크 하나로 포트폴리오 공유가 가능하고, Tailwind CSS로
    반응형 레이아웃을 빠르게 구현할 수 있음.
-2. Firebase(Firestore) + Claude API — FCM 웹 푸시는 강력하지만 Firestore(NoSQL)가
+2. Firebase(Firestore) + Gemini API — FCM 웹 푸시는 강력하지만 Firestore(NoSQL)가
    마일스톤 순서/의존관계 표현에는 Supabase보다 손이 더 감.
 3. 자체 백엔드(Node.js/Express + Postgres) — 제어권은 최대지만 개인 MVP 규모에
    비해 인증/배포/운영 부담이 과함.
@@ -41,7 +41,7 @@
 - **백엔드**: Supabase (Postgres + Auth + Realtime)
 - **인증**: 이메일/비밀번호 (Supabase Auth)
 - **알림**: Web Push API (서비스 워커 + VAPID 키 기반 브라우저 푸시)
-- **AI**: Claude API — (a) 로드맵 자동 생성, (b) 프로액티브 코칭 메시지 생성
+- **AI**: Gemini API — (a) 로드맵 자동 생성, (b) 프로액티브 코칭 메시지 생성
 - **AI 코칭 트리거**: 마일스톤 지연 감지는 서버 사이드 스케줄 작업(Supabase
   Edge Function 또는 cron)이 주기적으로 `due_date` 경과 여부를 확인해 트리거.
   MVP는 이 지연(delay) 기준 하나만 구현하며, "정체" 같은 별도 판정 기준은
@@ -50,7 +50,7 @@
 ## 주요 기능
 
 1. 회원가입/로그인 (이메일+비밀번호)
-2. 로드맵 생성 — AI 제안(목표 입력 → Claude API가 마일스톤 초안 생성) 또는 수동 입력
+2. 로드맵 생성 — AI 제안(목표 입력 → Gemini API가 마일스톤 초안 생성) 또는 수동 입력
 3. 다중 로드맵 관리 — 여러 목표 동시 진행, 홈에서 리스트로 확인
 4. 로드맵 타임라인 뷰 — 경로형(게임 스테이지 맵 스타일) 시각화, 마일스톤은 고정
    마감일(달력형)
@@ -89,7 +89,7 @@
 
 ## 에러 처리 / 엣지 케이스
 
-- Claude API 호출 실패 시 로드맵 생성은 수동 입력 폼으로 폴백
+- Gemini API 호출 실패 시 로드맵 생성은 수동 입력 폼으로 폴백
 - Web Push 구독이 없는 브라우저/기기는 알림 없이도 인앱 코칭 메시지함에서
   확인 가능해야 함
 - 마일스톤 마감일 수정 시 `overdue` 상태 재계산
@@ -109,5 +109,5 @@
 4. 마일스톤 체크 + 진행률 계산
 5. 타임라인/경로형 시각화 (커스텀 UI, 반응형 레이아웃)
 6. 알림/리마인더 (Web Push) + 스트릭 로직
-7. AI 로드맵 생성 (Claude API 연동)
+7. AI 로드맵 생성 (Gemini API 연동)
 8. AI 프로액티브 코칭 (지연 감지 스케줄 작업 + 메시지 발송)

@@ -7,12 +7,12 @@
 
 **Architecture:** Next.js(App Router) 클라이언트가 Supabase(Postgres + Auth)에 직접
 CRUD 쿼리를 날리고, AI가 필요한 두 지점(로드맵 생성, 지연 코칭)은 Supabase Edge
-Function이 서버 사이드에서 Claude API를 호출해 API 키를 클라이언트에 노출하지 않는다.
+Function이 서버 사이드에서 Gemini API를 호출해 API 키를 클라이언트에 노출하지 않는다.
 알림은 서비스 워커 기반 Web Push API로 발송한다. 화면은 Tailwind CSS의 반응형
 브레이크포인트로 모바일/데스크톱 브라우저 모두를 지원한다.
 
 **Tech Stack:** Next.js(React + TypeScript, App Router) + Tailwind CSS,
-@supabase/supabase-js, Supabase Edge Functions(Deno) + Anthropic Claude API,
+@supabase/supabase-js, Supabase Edge Functions(Deno) + Google Gemini API,
 Web Push API(서비스 워커, `web-push` 라이브러리), Jest(next/jest preset, 앱 코드),
 Deno test runner(엣지 함수 코드).
 
@@ -24,7 +24,7 @@ Deno test runner(엣지 함수 코드).
 - 백엔드: Supabase (Postgres + Auth + Realtime); Edge Function은 Deno 런타임에서 동작
 - 인증: 이메일/비밀번호만 (소셜 로그인 없음)
 - 알림: Web Push API (서비스 워커 + VAPID 키)
-- AI: Claude API — 로드맵 생성 + 프로액티브 코칭. 코칭 트리거는 마감일 경과(`delay`)
+- AI: Gemini API — 로드맵 생성 + 프로액티브 코칭. 코칭 트리거는 마감일 경과(`delay`)
   하나만 구현하며 "정체" 판정은 범위 밖(YAGNI)
 - 마일스톤은 고정 마감일(달력형)이며, 한 사용자가 여러 로드맵을 동시에 진행 가능
 - 습관 스트릭은 로드맵과 무관하게 계정 전체로 통합 집계
@@ -2092,7 +2092,8 @@ import { serve } from 'https://deno.land/std@0.208.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { parseRoadmapResponse } from './parse.ts';
 
-const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY')!;
+const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY')!;
+const GEMINI_MODEL = 'gemini-2.5-flash';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
@@ -2101,26 +2102,24 @@ serve(async (req) => {
 
   const prompt = `사용자의 목표: "${title}"\n추가 설명: "${description ?? ''}"\n이 목표를 달성하기 위한 마일스톤을 5~8개, 각 마일스톤의 title과 due_date(YYYY-MM-DD, 오늘부터 합리적인 간격)로 구성된 JSON 배열로만 응답해. 다른 설명 텍스트는 포함하지 마.`;
 
-  const aiResponse = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-api-key': ANTHROPIC_API_KEY,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
-      model: 'claude-sonnet-5',
-      max_tokens: 1024,
-      messages: [{ role: 'user', content: prompt }],
-    }),
-  });
+  const aiResponse = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { maxOutputTokens: 1024 },
+      }),
+    }
+  );
 
   if (!aiResponse.ok) {
     return new Response(JSON.stringify({ error: 'AI request failed' }), { status: 502 });
   }
 
   const aiJson = await aiResponse.json();
-  const rawText = aiJson.content?.[0]?.text ?? '';
+  const rawText = aiJson.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
 
   let milestones;
   try {
@@ -2372,7 +2371,8 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import webpush from 'npm:web-push@3.6.7';
 import { selectOverdueMilestones, buildCoachingPrompt } from './select.ts';
 
-const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY')!;
+const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY')!;
+const GEMINI_MODEL = 'gemini-2.5-flash';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const VAPID_PUBLIC_KEY = Deno.env.get('VAPID_PUBLIC_KEY')!;
@@ -2412,22 +2412,20 @@ serve(async () => {
       .gte('created_at', new Date().toISOString().slice(0, 10));
     if (existing && existing.length > 0) continue;
 
-    const aiResponse = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-5',
-        max_tokens: 256,
-        messages: [{ role: 'user', content: buildCoachingPrompt(milestone) }],
-      }),
-    });
+    const aiResponse = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: buildCoachingPrompt(milestone) }] }],
+          generationConfig: { maxOutputTokens: 256 },
+        }),
+      }
+    );
     if (!aiResponse.ok) continue;
     const aiJson = await aiResponse.json();
-    const message = aiJson.content?.[0]?.text ?? '마일스톤 마감일이 지났어요. 다시 시작해볼까요?';
+    const message = aiJson.candidates?.[0]?.content?.parts?.[0]?.text ?? '마일스톤 마감일이 지났어요. 다시 시작해볼까요?';
 
     await supabase.from('coaching_messages').insert({
       user_id: milestone.user_id,

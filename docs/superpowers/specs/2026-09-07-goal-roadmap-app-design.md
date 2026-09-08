@@ -94,7 +94,9 @@
 5. 마일스톤 상세 — 체크, 메모, 마감일 수정
 6. 진행률 대시보드 — 전체 로드맵 요약
 7. AI 코칭 메시지함 — 프로액티브 메시지 히스토리
-8. 설정 — 알림 on/off, 계정 관리
+8. 설정 — 알림 on/off, 리마인더 시간(`reminder_time`) 변경, 계정 관리. 페이지를
+   열면 DB에 저장된 현재 값을 불러와 체크박스/시간 입력에 반영한다(항상 켜진
+   상태로 시작하지 않는다).
 
 ## 데이터 모델 초안
 
@@ -103,7 +105,10 @@
   status(`active`|`completed`|`archived`; 모든 마일스톤이 `done`이 되면 클라이언트가
   자동으로 `completed`로 갱신, `archived`는 MVP 범위 밖), created_at
 - **milestones**: id, roadmap_id(FK), title, description, due_date, order_index,
-  status(`pending`|`done`|`overdue`), completed_at
+  status(`pending`|`done`|`overdue`), completed_at. 조회 시 정렬은 `due_date`가
+  기준이고 `order_index`는 같은 날짜인 마일스톤들의 동점 처리(입력 순서 유지)용
+  보조 키다 — 마일스톤을 나중에 추가하거나 여러 개를 한 번에 만들 때도 입력 순서와
+  무관하게 타임라인이 항상 날짜순으로 보이게 하기 위함.
 - **habit_checkins**: id, user_id(FK), checkin_date, streak_count
   (로드맵 무관, 계정 전체 통합 스트릭)
 - **coaching_messages**: id, user_id(FK), roadmap_id(FK),

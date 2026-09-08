@@ -945,7 +945,7 @@ test('createMilestone inserts and returns the created row', async () => {
   expect(result).toEqual(row);
 });
 
-test('listMilestones returns rows ordered by order_index', async () => {
+test('listMilestones returns rows from the query (real ordering is verified by Supabase, not this fake client)', async () => {
   const rows = [{ id: 'm1', order_index: 0 }, { id: 'm2', order_index: 1 }];
   const client = makeFakeClient([{ data: rows, error: null }]);
   const result = await listMilestones(client, 'r1');
@@ -1009,10 +1009,16 @@ export async function createMilestone(
 }
 
 export async function listMilestones(client: SupabaseClient, roadmapId: string): Promise<Milestone[]> {
+  // due_date는 실제 정렬 기준, order_index는 같은 날짜인 마일스톤들 사이의
+  // 입력 순서를 지키기 위한 동점 처리용 보조 키다. 이렇게 하면 나중에 마일스톤을
+  // 추가하거나(Task 9) 수동으로 여러 개를 한 번에 만들 때(Task 8) 입력 순서와
+  // 무관하게 타임라인이 항상 날짜순으로 보인다 — order_index를 매번 다시
+  // 계산해서 맞출 필요가 없다.
   const { data, error } = await client
     .from('milestones')
     .select('*')
     .eq('roadmap_id', roadmapId)
+    .order('due_date', { ascending: true })
     .order('order_index', { ascending: true });
   if (error) throw error;
   return (data ?? []) as Milestone[];
@@ -1335,6 +1341,9 @@ export default function RoadmapDetailPage() {
 
   async function handleAddMilestone() {
     if (!id || !newMilestoneTitle || !newMilestoneDue) return;
+    // order_index는 그냥 끝 번호만 매기면 된다 - listMilestones가 due_date로
+    // 정렬해서 돌려주므로, 이 마일스톤의 마감일이 기존 것보다 이르더라도
+    // 타임라인에서는 알아서 올바른 위치에 보인다.
     await createMilestone(supabase, {
       roadmap_id: id,
       title: newMilestoneTitle,
@@ -2028,7 +2037,7 @@ git commit -m "feat: add check-in recording, home streak display, and milestone-
 - Test: `__tests__/notifications.test.ts`
 
 **Interfaces:**
-- Consumes: `useRequireAuth` (Task 3)
+- Consumes: `useRequireAuth` (Task 3), `NotificationSettings` (Task 2)
 - Produces: `subscribeToPush(vapidPublicKey: string): Promise<PushSubscriptionJSON | null>`,
   `urlBase64ToUint8Array(base64String: string): Uint8Array`
 
@@ -2120,11 +2129,12 @@ Expected: PASS (2 tests)
 ```tsx
 // app/(dashboard)/settings/page.tsx
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '../../../lib/supabase';
 import { useRequireAuth } from '../../../lib/useAuth';
 import { subscribeToPush } from '../../../lib/notifications';
+import type { NotificationSettings } from '../../../types/models';
 
 const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY as string;
 
@@ -2132,6 +2142,27 @@ export default function SettingsPage() {
   const userId = useRequireAuth();
   const router = useRouter();
   const [reminderEnabled, setReminderEnabled] = useState(true);
+  const [reminderTime, setReminderTime] = useState('09:00');
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    if (!userId) return;
+    // Task 2의 트리거가 가입 시점에 기본 행을 이미 만들어뒀으므로, 여기서는
+    // 그 값을 읽어와 체크박스/시간 입력을 실제 DB 상태와 맞춘다(이전 버전은
+    // 항상 켜진 상태로 시작해 새로고침하면 꺼둔 설정이 다시 켜진 것처럼 보였다).
+    supabase
+      .from('notification_settings')
+      .select('reminder_enabled, reminder_time')
+      .eq('user_id', userId)
+      .single()
+      .then(({ data }) => {
+        const settings = data as Pick<NotificationSettings, 'reminder_enabled' | 'reminder_time'> | null;
+        if (!settings) return;
+        setReminderEnabled(settings.reminder_enabled);
+        setReminderTime(settings.reminder_time.slice(0, 5));
+        setLoaded(true);
+      });
+  }, [userId]);
 
   async function toggleReminder(value: boolean) {
     setReminderEnabled(value);
@@ -2140,15 +2171,25 @@ export default function SettingsPage() {
     await supabase
       .from('notification_settings')
       .upsert(
-        { user_id: userId, reminder_enabled: value, reminder_time: '09:00', push_subscription: subscription },
+        { user_id: userId, reminder_enabled: value, push_subscription: subscription },
         { onConflict: 'user_id' }
       );
+  }
+
+  async function handleReminderTimeChange(value: string) {
+    setReminderTime(value);
+    if (!userId) return;
+    await supabase
+      .from('notification_settings')
+      .upsert({ user_id: userId, reminder_time: value }, { onConflict: 'user_id' });
   }
 
   async function handleLogout() {
     await supabase.auth.signOut();
     router.replace('/login');
   }
+
+  if (!loaded) return null;
 
   return (
     <div className="mx-auto max-w-md space-y-4 p-6">
@@ -2157,6 +2198,19 @@ export default function SettingsPage() {
         <input type="checkbox" checked={reminderEnabled} onChange={(e) => toggleReminder(e.target.checked)} />
         알림 받기
       </label>
+      <div className="flex items-center gap-2">
+        <label className="text-sm text-gray-600" htmlFor="reminder-time">
+          알림 시간
+        </label>
+        <input
+          id="reminder-time"
+          type="time"
+          className="rounded-lg border p-2"
+          value={reminderTime}
+          disabled={!reminderEnabled}
+          onChange={(e) => handleReminderTimeChange(e.target.value)}
+        />
+      </div>
       <button className="rounded-lg border px-4 py-2" onClick={handleLogout}>
         로그아웃
       </button>
@@ -2218,13 +2272,16 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
 Run: `npm run dev` (HTTPS 또는 `localhost`에서 실행 — Web Push는 보안 컨텍스트 필요) →
 알림 받기를 켰을 때 브라우저 알림 권한 요청이 뜨는지, 허용 후
 `notification_settings.push_subscription`이 채워지는지, 로그아웃이 로그인 페이지로
-보내는지, 로그인 안 한 상태로 설정 페이지에 들어가면 로그인 페이지로 튕기는지 확인
+보내는지, 로그인 안 한 상태로 설정 페이지에 들어가면 로그인 페이지로 튕기는지 확인.
+**추가로**: 알림을 끄고 시간을 다른 값으로 바꾼 뒤 페이지를 새로고침해서 체크박스와
+시간 입력이 방금 바꾼 값 그대로 유지되는지(DB에서 다시 불러왔는지), Supabase
+Studio에서 `notification_settings.reminder_time`이 실제로 바뀌었는지 확인
 
 - [ ] **Step 8: 커밋**
 
 ```bash
 git add lib/notifications.ts __tests__/notifications.test.ts public/sw.js app/\(dashboard\)/settings/page.tsx app/\(dashboard\)/layout.tsx
-git commit -m "feat: add web push subscription, settings page, and subscription-refresh handling"
+git commit -m "feat: add web push subscription, settings page (loads existing values, editable reminder time), and subscription-refresh handling"
 ```
 
 ---

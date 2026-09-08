@@ -4231,3 +4231,295 @@ Run: `npm run dev` → 설정에서 "리더보드에 표시"를 켠 계정 2개�
 git add lib/leaderboard.ts __tests__/leaderboard.test.ts app/\(dashboard\)/leaderboard/page.tsx app/\(dashboard\)/layout.tsx
 git commit -m "feat: add streak leaderboard"
 ```
+
+---
+
+### Task 26: 커뮤니티 페이지 (공개 로드맵 둘러보기 + 검색)
+
+**Files:**
+- Create: `lib/community.ts`
+- Create: `app/(dashboard)/community/page.tsx`
+- Modify: `app/(dashboard)/layout.tsx` (Task 7/14/25에서 만든 파일 — 네비게이션에
+  "커뮤니티" 추가)
+- Modify: `test-utils/fakeSupabaseClient.ts` (Task 5에서 만든 파일 — 지금까지 안 쓰던
+  `in`/`ilike`/`gte`를 builder에 추가한다)
+- Test: `__tests__/community.test.ts`
+
+**Interfaces:**
+- Consumes: `useRequireAuth` (Task 3)
+- Produces: `listCommunityRoadmaps(client, sortBy, searchName?): Promise<CommunityEntry[]>`
+  (`sortBy`는 `'today' | 'total'`, `CommunityEntry`는 `{ roadmapId, title, ownerName,
+  highFiveCount }`)
+
+이 태스크는 Task 21(공개 로드맵/RLS)·Task 24(하이파이브)가 이미 끝나 있다고 전제한다.
+RLS는 이미 다 갖춰져 있어서(공개 로드맵은 `roadmaps_public_read`, 그 마일스톤은
+`milestones_public_read`, 리액션은 `milestone_reactions_public_read`, 닉네임은
+`profiles_read_all`) 새 정책을 추가할 필요가 없다 — 조회 로직만 짜면 된다.
+
+- [ ] **Step 1: 실패하는 테스트를 작성한다**
+
+```ts
+// __tests__/community.test.ts
+import { listCommunityRoadmaps } from '../lib/community';
+import { makeFakeClient } from '../test-utils/fakeSupabaseClient';
+
+test('lists public roadmaps with owner nickname and high-five count', async () => {
+  const client = makeFakeClient([
+    { data: [{ id: 'r1', title: '10km 마라톤', user_id: 'u1' }], error: null }, // public roadmaps
+    { data: [{ user_id: 'u1', display_name: '동언' }], error: null }, // owner profiles
+    { data: [{ id: 'm1' }, { id: 'm2' }], error: null }, // r1의 마일스톤 id 목록
+    { data: null, error: null, count: 5 }, // r1의 하이파이브 개수
+  ]);
+  const result = await listCommunityRoadmaps(client, 'total');
+  expect(result).toEqual([{ roadmapId: 'r1', title: '10km 마라톤', ownerName: '동언', highFiveCount: 5 }]);
+});
+
+test('returns an empty array when there are no public roadmaps', async () => {
+  const client = makeFakeClient([{ data: [], error: null }]);
+  expect(await listCommunityRoadmaps(client, 'total')).toEqual([]);
+});
+
+test('skips the roadmap query entirely when a name search matches nobody', async () => {
+  const client = makeFakeClient([{ data: [], error: null }]); // profiles search -> no match
+  const result = await listCommunityRoadmaps(client, 'total', '존재안함');
+  expect(result).toEqual([]);
+  expect(client.from).toHaveBeenCalledTimes(1);
+});
+
+test('returns 0 high-fives for a roadmap with no milestones, without querying reactions', async () => {
+  const client = makeFakeClient([
+    { data: [{ id: 'r1', title: '빈 로드맵', user_id: 'u1' }], error: null },
+    { data: [{ user_id: 'u1', display_name: '동언' }], error: null },
+    { data: [], error: null }, // 마일스톤 없음
+  ]);
+  const result = await listCommunityRoadmaps(client, 'total');
+  expect(result).toEqual([{ roadmapId: 'r1', title: '빈 로드맵', ownerName: '동언', highFiveCount: 0 }]);
+  expect(client.from).toHaveBeenCalledTimes(3);
+});
+```
+
+- [ ] **Step 2: 테스트 실행 → 실패 확인**
+
+Run: `npx jest community.test.ts`
+Expected: FAIL with "Cannot find module '../lib/community'"
+
+- [ ] **Step 3: 가짜 클라이언트에 `in`/`ilike`/`gte`를 추가한다**
+
+Task 5에서 만든 `test-utils/fakeSupabaseClient.ts`의 builder는 지금까지
+`insert`/`update`/`upsert`/`delete`/`select`/`eq`/`neq`/`order`/`maybeSingle`/`single`/`then`
+(그리고 Task 24에서 추가한 `count`)만 지원한다. `lib/community.ts`는 `.in()`(2곳),
+`.ilike()`, `.gte()`를 호출하므로 이 메서드들을 builder에 추가하지 않으면
+Step 1의 테스트가 `TypeError: ... is not a function`으로 실패한다.
+
+```ts
+// test-utils/fakeSupabaseClient.ts 의 builder 정의에 추가
+const builder: any = {
+  insert: jest.fn(() => builder),
+  update: jest.fn(() => builder),
+  upsert: jest.fn(() => builder),
+  delete: jest.fn(() => builder),
+  select: jest.fn(() => builder),
+  eq: jest.fn(() => builder),
+  neq: jest.fn(() => builder),
+  in: jest.fn(() => builder),
+  ilike: jest.fn(() => builder),
+  gte: jest.fn(() => builder),
+  order: jest.fn(() => builder),
+  maybeSingle: jest.fn(() => Promise.resolve(result)),
+  single: jest.fn(() => Promise.resolve(result)),
+  then: (resolve: any, reject: any) => Promise.resolve(result).then(resolve, reject),
+};
+```
+
+- [ ] **Step 4: 구현한다**
+
+```ts
+// lib/community.ts
+import type { SupabaseClient } from '@supabase/supabase-js';
+
+export interface CommunityEntry {
+  roadmapId: string;
+  title: string;
+  ownerName: string;
+  highFiveCount: number;
+}
+
+// roadmaps와 profiles는 둘 다 auth.users를 참조할 뿐 서로 직접 FK로 안 묶여있어서
+// PostgREST가 자동으로 조인(embedding)해주지 못한다 — user_id를 키 삼아 두 번
+// 조회해서 직접 합친다(리더보드, Task 25와 같은 패턴).
+async function countHighFivesForRoadmap(
+  client: SupabaseClient,
+  roadmapId: string,
+  since?: string
+): Promise<number> {
+  const { data: milestoneRows, error: milestoneError } = await client
+    .from('milestones')
+    .select('id')
+    .eq('roadmap_id', roadmapId);
+  if (milestoneError) throw milestoneError;
+  const milestoneIds = (milestoneRows ?? []).map((m: { id: string }) => m.id);
+  if (milestoneIds.length === 0) return 0;
+
+  let query = client
+    .from('milestone_reactions')
+    .select('id', { count: 'exact', head: true })
+    .in('milestone_id', milestoneIds);
+  if (since) {
+    query = query.gte('created_at', since);
+  }
+  const { count, error } = await query;
+  if (error) throw error;
+  return count ?? 0;
+}
+
+export async function listCommunityRoadmaps(
+  client: SupabaseClient,
+  sortBy: 'today' | 'total',
+  searchName?: string
+): Promise<CommunityEntry[]> {
+  let roadmapQuery = client.from('roadmaps').select('id, title, user_id').eq('is_public', true);
+
+  if (searchName) {
+    const { data: matchingProfiles, error: searchError } = await client
+      .from('profiles')
+      .select('user_id')
+      .ilike('display_name', `%${searchName}%`);
+    if (searchError) throw searchError;
+    const userIds = (matchingProfiles ?? []).map((p: { user_id: string }) => p.user_id);
+    if (userIds.length === 0) return [];
+    roadmapQuery = roadmapQuery.in('user_id', userIds);
+  }
+
+  const { data: roadmaps, error } = await roadmapQuery;
+  if (error) throw error;
+  if (!roadmaps || roadmaps.length === 0) return [];
+
+  const ownerIds = [...new Set(roadmaps.map((r: { user_id: string }) => r.user_id))];
+  const { data: profiles, error: profilesError } = await client
+    .from('profiles')
+    .select('user_id, display_name')
+    .in('user_id', ownerIds);
+  if (profilesError) throw profilesError;
+  const nameByUserId = new Map(
+    (profiles ?? []).map((p: { user_id: string; display_name: string }) => [p.user_id, p.display_name])
+  );
+
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+
+  const entries = await Promise.all(
+    roadmaps.map(async (r: { id: string; title: string; user_id: string }) => {
+      const highFiveCount = await countHighFivesForRoadmap(
+        client,
+        r.id,
+        sortBy === 'today' ? todayStart.toISOString() : undefined
+      );
+      return {
+        roadmapId: r.id,
+        title: r.title,
+        ownerName: nameByUserId.get(r.user_id) ?? '알 수 없음',
+        highFiveCount,
+      };
+    })
+  );
+
+  return entries.sort((a, b) => b.highFiveCount - a.highFiveCount);
+}
+```
+
+"오늘" 기준으로 필터링하는 `since` 값은 실제로 Postgres 쪽 `.gte('created_at', ...)`가
+처리하므로, 가짜 클라이언트로는 그 경계 판정 자체(자정 넘었는지 등)를 검증할 수
+없다 — Step 7의 수동 확인에서 실제 Supabase로 확인한다.
+
+- [ ] **Step 5: 테스트 실행 → 통과 확인**
+
+Run: `npx jest community.test.ts`
+Expected: PASS (4 tests)
+
+- [ ] **Step 6: 커뮤니티 페이지를 만든다**
+
+```tsx
+// app/(dashboard)/community/page.tsx
+'use client';
+import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import { supabase } from '../../../lib/supabase';
+import { useRequireAuth } from '../../../lib/useAuth';
+import { listCommunityRoadmaps, CommunityEntry } from '../../../lib/community';
+
+export default function CommunityPage() {
+  const userId = useRequireAuth();
+  const [sortBy, setSortBy] = useState<'today' | 'total'>('today');
+  const [search, setSearch] = useState('');
+  const [entries, setEntries] = useState<CommunityEntry[]>([]);
+
+  useEffect(() => {
+    if (!userId) return;
+    listCommunityRoadmaps(supabase, sortBy, search || undefined).then(setEntries);
+  }, [userId, sortBy, search]);
+
+  return (
+    <div className="mx-auto max-w-2xl p-6">
+      <h1 className="text-xl font-bold">커뮤니티</h1>
+      <div className="mt-4 flex gap-2">
+        <button
+          className={`rounded-lg px-3 py-2 text-sm ${sortBy === 'today' ? 'bg-orange-500 text-white' : 'border'}`}
+          onClick={() => setSortBy('today')}
+        >
+          오늘 하이파이브순
+        </button>
+        <button
+          className={`rounded-lg px-3 py-2 text-sm ${sortBy === 'total' ? 'bg-orange-500 text-white' : 'border'}`}
+          onClick={() => setSortBy('total')}
+        >
+          추천순
+        </button>
+      </div>
+      <input
+        className="mt-3 w-full rounded-lg border p-3"
+        placeholder="닉네임으로 검색"
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+      />
+      {entries.length === 0 && (
+        <p className="mt-4 text-sm text-gray-500">공개된 로드맵이 아직 없어요.</p>
+      )}
+      <ul className="mt-4 space-y-2">
+        {entries.map((entry) => (
+          <li key={entry.roadmapId}>
+            <Link href={`/r/${entry.roadmapId}`} className="block rounded-xl border p-3">
+              <p className="font-medium">{entry.title}</p>
+              <p className="text-sm text-gray-600">
+                {entry.ownerName} · 하이파이브 {entry.highFiveCount}
+              </p>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+```
+
+- [ ] **Step 7: 네비게이션에 커뮤니티 링크를 추가한다**
+
+```tsx
+// app/(dashboard)/layout.tsx 의 <nav> 안, "리더보드" 링크 뒤에 추가
+<Link href="/community">커뮤니티</Link>
+```
+
+- [ ] **Step 8: 수동 확인**
+
+Run: `npm run dev` → 로드맵 2~3개를 공개로 전환하고 서로 하이파이브를 남긴 뒤,
+커뮤니티 페이지에서 "오늘 하이파이브순"/"추천순" 전환 시 순서가 바뀌는지(둘 다
+같은 값이면 구분이 안 보일 수 있으니 한쪽에만 오래된 날짜의 리액션을 만들어
+차이를 만든다), 닉네임으로 검색하면 그 사람의 공개 로드맵만 남는지, 항목을
+누르면 `/r/<id>` 공개 화면으로 이동하는지, 로드맵을 비공개로 돌리면 목록에서
+바로 빠지는지 확인
+
+- [ ] **Step 9: 커밋**
+
+```bash
+git add lib/community.ts __tests__/community.test.ts app/\(dashboard\)/community/page.tsx app/\(dashboard\)/layout.tsx test-utils/fakeSupabaseClient.ts
+git commit -m "feat: add community page to browse public roadmaps by high-fives and nickname search"
+```

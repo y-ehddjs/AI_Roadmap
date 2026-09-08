@@ -3352,6 +3352,19 @@ create policy "milestone_reactions_public_read" on public.milestone_reactions
     )
   );
 
+-- 위 정책은 is_public = true일 때만 통과한다. 로드맵 주인이 나중에 다시
+-- 비공개로 돌리면 이 정책만으로는 주인조차 자신이 받은 하이파이브를 조회할
+-- 방법이 없어지므로, "공개 여부와 무관하게 로드맵 주인은 자기 것을 읽을 수
+-- 있다"는 정책을 별도로 추가한다(RLS는 여러 정책을 OR로 합친다).
+create policy "milestone_reactions_owner_read" on public.milestone_reactions
+  for select using (
+    exists (
+      select 1 from public.milestones m
+      join public.roadmaps r on r.id = m.roadmap_id
+      where m.id = milestone_reactions.milestone_id and r.user_id = auth.uid()
+    )
+  );
+
 create policy "milestone_reactions_insert_own" on public.milestone_reactions
   for insert with check (
     auth.uid() = user_id
@@ -3536,11 +3549,31 @@ const [displayName, setDisplayName] = useState('');
 const [showOnLeaderboard, setShowOnLeaderboard] = useState(false);
 ```
 
+Task 14의 `useEffect` 안 `.then(({ data }) => {...})` 콜백은 `async`가 아니라서
+그 안에서 바로 `await getProfile(...)`를 쓸 수 없다. 콜백 전체를 아래 `async` 버전으로
+교체한다(`.then(async ({ data }) => {...})`):
+
 ```tsx
-// 기존 notification_settings를 불러오는 useEffect 안, setLoaded(true) 직전에 추가
-const profile = await getProfile(supabase, userId);
-setDisplayName(profile.display_name);
-setShowOnLeaderboard(profile.show_on_leaderboard);
+// app/(dashboard)/settings/page.tsx — 기존 useEffect의 .then(...) 콜백을 통째로 교체
+useEffect(() => {
+  if (!userId) return;
+  supabase
+    .from('notification_settings')
+    .select('reminder_enabled, reminder_time')
+    .eq('user_id', userId)
+    .single()
+    .then(async ({ data }) => {
+      const settings = data as Pick<NotificationSettings, 'reminder_enabled' | 'reminder_time'> | null;
+      if (settings) {
+        setReminderEnabled(settings.reminder_enabled);
+        setReminderTime(settings.reminder_time.slice(0, 5));
+      }
+      const profile = await getProfile(supabase, userId);
+      setDisplayName(profile.display_name);
+      setShowOnLeaderboard(profile.show_on_leaderboard);
+      setLoaded(true);
+    });
+}, [userId]);
 ```
 
 ```tsx
@@ -3600,32 +3633,60 @@ git commit -m "feat: add profile CRUD and nickname/leaderboard settings"
 
 **Files:**
 - Modify: `lib/roadmaps.ts` (Task 5에서 만든 파일에 함수를 추가한다)
+- Modify: `lib/milestones.ts` (Task 6에서 만든 파일에 함수를 추가한다)
 - Modify: `app/roadmap/[id]/page.tsx` (Task 9/11에서 만든 파일 — 공개 전환 토글 추가)
 - Create: `app/r/[id]/page.tsx`
-- Test: `__tests__/roadmaps.test.ts` (Task 5에서 만든 파일에 케이스를 추가한다)
+- Test: `__tests__/roadmaps.test.ts`, `__tests__/milestones.test.ts` (Task 5/6에서
+  만든 파일에 케이스를 추가한다)
 
 **Interfaces:**
-- Consumes: `listMilestones` (Task 6), `calculateProgress`, `milestoneStatus` (Task 4),
-  `computeNodePositions` (Task 11)
-- Produces: `setRoadmapPublic(client, roadmapId, isPublic): Promise<void>`
+- Consumes: `calculateProgress`, `milestoneStatus` (Task 4), `computeNodePositions` (Task 11)
+- Produces: `setRoadmapPublic(client, roadmapId, isPublic): Promise<void>`,
+  `getPublicRoadmap(client, roadmapId): Promise<Pick<Roadmap,'id'|'title'>>`,
+  `listPublicMilestones(client, roadmapId): Promise<Pick<Milestone,'id'|'title'|'due_date'|'order_index'|'status'>[]>`
+
+공개 페이지는 일부러 기존 `getRoadmap`/`listMilestones`(둘 다 `select('*')`)를
+쓰지 않는다 — 그 함수들은 로드맵 설명·마일스톤 메모까지 통째로 클라이언트에
+내려보내는데, 화면엔 제목/마감일만 그려도 브라우저 네트워크 응답에는 그 개인
+메모가 그대로 담겨 나간다("공개"로 표시 안 한 내용까지 개발자 도구로 보이는
+셈). 그래서 공개 화면 전용으로 필요한 컬럼만 딱 골라 가져오는 별도 함수를 둔다.
 
 - [ ] **Step 1: 실패하는 테스트를 추가한다**
 
 ```ts
 // __tests__/roadmaps.test.ts 에 추가
-import { setRoadmapPublic } from '../lib/roadmaps';
+import { setRoadmapPublic, getPublicRoadmap } from '../lib/roadmaps';
 
 test('setRoadmapPublic updates the is_public flag', async () => {
   const client = makeFakeClient([{ data: null, error: null }]);
   await setRoadmapPublic(client, 'r1', true);
   expect(client.from).toHaveBeenCalledWith('roadmaps');
 });
+
+test('getPublicRoadmap only returns id and title', async () => {
+  const row = { id: 'r1', title: 'Test' };
+  const client = makeFakeClient([{ data: row, error: null }]);
+  const result = await getPublicRoadmap(client, 'r1');
+  expect(result).toEqual(row);
+});
+```
+
+```ts
+// __tests__/milestones.test.ts 에 추가
+import { listPublicMilestones } from '../lib/milestones';
+
+test('listPublicMilestones returns only the public-safe columns', async () => {
+  const rows = [{ id: 'm1', title: '1km 완주', due_date: '2026-10-01', order_index: 0, status: 'pending' }];
+  const client = makeFakeClient([{ data: rows, error: null }]);
+  const result = await listPublicMilestones(client, 'r1');
+  expect(result).toEqual(rows);
+});
 ```
 
 - [ ] **Step 2: 테스트 실행 → 실패 확인**
 
-Run: `npx jest roadmaps.test.ts`
-Expected: FAIL with "setRoadmapPublic is not a function"
+Run: `npx jest roadmaps.test.ts milestones.test.ts`
+Expected: FAIL — `setRoadmapPublic`/`getPublicRoadmap`/`listPublicMilestones` are not functions
 
 - [ ] **Step 3: 구현한다**
 
@@ -3635,42 +3696,93 @@ export async function setRoadmapPublic(client: SupabaseClient, roadmapId: string
   const { error } = await client.from('roadmaps').update({ is_public: isPublic }).eq('id', roadmapId);
   if (error) throw error;
 }
+
+// 공개 화면 전용 — description/user_id 등 개인 정보가 담긴 컬럼은 아예
+// select하지 않는다. UI가 안 그린다고 안전한 게 아니라, 네트워크 응답에
+// 애초에 안 실려야 안전하다.
+export async function getPublicRoadmap(client: SupabaseClient, roadmapId: string): Promise<Pick<Roadmap, 'id' | 'title'>> {
+  const { data, error } = await client.from('roadmaps').select('id, title').eq('id', roadmapId).single();
+  if (error) throw error;
+  return data as Pick<Roadmap, 'id' | 'title'>;
+}
+```
+
+```ts
+// lib/milestones.ts 에 추가
+// 공개 화면 전용 — description(개인 메모)과 roadmap_id는 select하지 않는다.
+export async function listPublicMilestones(
+  client: SupabaseClient,
+  roadmapId: string
+): Promise<Pick<Milestone, 'id' | 'title' | 'due_date' | 'order_index' | 'status'>[]> {
+  const { data, error } = await client
+    .from('milestones')
+    .select('id, title, due_date, order_index, status')
+    .eq('roadmap_id', roadmapId)
+    .order('due_date', { ascending: true })
+    .order('order_index', { ascending: true });
+  if (error) throw error;
+  return (data ?? []) as Pick<Milestone, 'id' | 'title' | 'due_date' | 'order_index' | 'status'>[];
+}
 ```
 
 - [ ] **Step 4: 테스트 실행 → 통과 확인**
 
-Run: `npx jest roadmaps.test.ts`
-Expected: PASS (11 tests — 10 from before + 1 new)
+Run: `npx jest roadmaps.test.ts milestones.test.ts`
+Expected: `roadmaps.test.ts` PASS (12 tests — 10 from before + 2 new),
+`milestones.test.ts` PASS (7 tests — 6 from before + 1 new)
 
-- [ ] **Step 5: 로드맵 상세 페이지에 공개 전환 토글을 추가한다**
+- [ ] **Step 5: 로드맵 상세 페이지에 공개 전환 토글과 복사 가능한 공유 링크를 추가한다**
 
 ```tsx
 // app/roadmap/[id]/page.tsx — import에 추가
 import { setRoadmapPublic } from '../../../lib/roadmaps';
+import { useState } from 'react'; // 이미 import돼 있다면 생략
 ```
 
 ```tsx
-// 컴포넌트 안에 핸들러 추가
+// 컴포넌트 안에 state/핸들러 추가
+const [linkCopied, setLinkCopied] = useState(false);
+
 async function handleTogglePublic(checked: boolean) {
   if (!id) return;
   await setRoadmapPublic(supabase, id, checked);
   await load();
 }
+
+async function handleCopyLink() {
+  if (!id) return;
+  await navigator.clipboard.writeText(`${window.location.origin}/r/${id}`);
+  setLinkCopied(true);
+  setTimeout(() => setLinkCopied(false), 2000);
+}
 ```
 
 ```tsx
 {/* 헤더의 삭제 버튼 아래, 진행률 카드 위에 추가 */}
-<label className="flex items-center justify-between rounded-xl border p-3 text-sm">
-  <span>
-    공개 링크로 공유
-    {roadmap.is_public && <span className="ml-2 text-xs text-gray-500">/r/{roadmap.id}</span>}
-  </span>
-  <input type="checkbox" checked={roadmap.is_public} onChange={(e) => handleTogglePublic(e.target.checked)} />
-</label>
+<div className="rounded-xl border p-3 text-sm">
+  <label className="flex items-center justify-between">
+    <span>공개 링크로 공유</span>
+    <input type="checkbox" checked={roadmap.is_public} onChange={(e) => handleTogglePublic(e.target.checked)} />
+  </label>
+  {roadmap.is_public && (
+    <div className="mt-2 flex items-center gap-2">
+      <input
+        readOnly
+        value={`${typeof window !== 'undefined' ? window.location.origin : ''}/r/${id}`}
+        className="flex-1 rounded-lg border bg-gray-50 p-2 text-xs text-gray-600"
+        onFocus={(e) => e.target.select()}
+      />
+      <button className="rounded-lg border px-3 py-2 text-xs" onClick={handleCopyLink}>
+        {linkCopied ? '복사됨' : '복사'}
+      </button>
+    </div>
+  )}
+</div>
 ```
 
 - [ ] **Step 6: 공개 로드맵 보기 페이지를 만든다** (로그인 여부와 무관하게
-접근 가능 — `useRequireAuth`를 쓰지 않는다. 편집/삭제/추가 UI는 전혀 없다)
+접근 가능 — `useRequireAuth`를 쓰지 않는다. 편집/삭제/추가 UI는 전혀 없고,
+`getPublicRoadmap`/`listPublicMilestones`로 공개 화면에 필요한 컬럼만 가져온다)
 
 ```tsx
 // app/r/[id]/page.tsx
@@ -3678,24 +3790,27 @@ async function handleTogglePublic(checked: boolean) {
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { supabase } from '../../../lib/supabase';
-import { getRoadmap } from '../../../lib/roadmaps';
-import { listMilestones } from '../../../lib/milestones';
+import { getPublicRoadmap } from '../../../lib/roadmaps';
+import { listPublicMilestones } from '../../../lib/milestones';
 import { calculateProgress, milestoneStatus } from '../../../lib/progress';
 import { computeNodePositions } from '../../../lib/timeline';
 import type { Roadmap, Milestone } from '../../../types/models';
 
+type PublicRoadmap = Pick<Roadmap, 'id' | 'title'>;
+type PublicMilestone = Pick<Milestone, 'id' | 'title' | 'due_date' | 'order_index' | 'status'>;
+
 export default function PublicRoadmapPage() {
   const { id } = useParams<{ id: string }>();
-  const [roadmap, setRoadmap] = useState<Roadmap | null>(null);
-  const [milestones, setMilestones] = useState<Milestone[]>([]);
+  const [roadmap, setRoadmap] = useState<PublicRoadmap | null>(null);
+  const [milestones, setMilestones] = useState<PublicMilestone[]>([]);
   const [notFound, setNotFound] = useState(false);
 
   useEffect(() => {
     if (!id) return;
-    getRoadmap(supabase, id)
+    getPublicRoadmap(supabase, id)
       .then(async (r) => {
         setRoadmap(r);
-        setMilestones(await listMilestones(supabase, id));
+        setMilestones(await listPublicMilestones(supabase, id));
       })
       .catch(() => setNotFound(true));
   }, [id]);
@@ -3749,21 +3864,23 @@ export default function PublicRoadmapPage() {
 }
 ```
 
-`getRoadmap`이 RLS에 막혀 에러를 던지면(비공개거나 없는 id) `catch`에서
+`getPublicRoadmap`이 RLS에 막혀 에러를 던지면(비공개거나 없는 id) `catch`에서
 `notFound`로 처리한다 — Task 21의 `roadmaps_public_read` 정책 덕분에, 소유자가
 아니어도 `is_public = true`인 로드맵은 이 쿼리가 통과된다.
 
 - [ ] **Step 7: 수동 확인**
 
-Run: `npm run dev` → 로드맵을 공개로 전환하고 `/r/<id>`를 시크릿 창(비로그인)으로
-열어서 타임라인이 읽기 전용으로 보이는지, 다시 비공개로 전환한 뒤 같은 링크로
-들어가면 "찾을 수 없거나 비공개" 문구가 뜨는지 확인
+Run: `npm run dev` → 로드맵을 공개로 전환하고 "복사" 버튼으로 링크를 복사해
+`/r/<id>`를 시크릿 창(비로그인)으로 열어서 타임라인이 읽기 전용으로 보이는지,
+브라우저 개발자 도구 네트워크 탭에서 이 페이지의 응답에 마일스톤 메모나 로드맵
+설명이 전혀 안 실려있는지, 다시 비공개로 전환한 뒤 같은 링크로 들어가면
+"찾을 수 없거나 비공개" 문구가 뜨는지 확인
 
 - [ ] **Step 8: 커밋**
 
 ```bash
-git add lib/roadmaps.ts __tests__/roadmaps.test.ts app/roadmap/\[id\]/page.tsx app/r/\[id\]/page.tsx
-git commit -m "feat: add public roadmap sharing"
+git add lib/roadmaps.ts lib/milestones.ts __tests__/roadmaps.test.ts __tests__/milestones.test.ts app/roadmap/\[id\]/page.tsx app/r/\[id\]/page.tsx
+git commit -m "feat: add public roadmap sharing with a privacy-safe narrow read path"
 ```
 
 ---

@@ -3269,3 +3269,848 @@ Run: `npm run dev` → Task 18/19에서 발송된 코칭 메시지가 메시지�
 git add lib/coaching.ts __tests__/coaching.test.ts app/\(dashboard\)/coaching/page.tsx
 git commit -m "feat: add coaching inbox page"
 ```
+
+---
+
+## 커뮤니티 기능 (로드맵 공개 공유 / 하이파이브 / 리더보드)
+
+Task 1~20으로 핵심 MVP가 끝난 뒤 추가하는 확장 기능. "혼자 쓰는 투두리스트" 느낌을
+벗어나기 위한 세 가지: (10) 로드맵 공개 공유, (11) 마일스톤 하이파이브 응원,
+(12) 스트릭 리더보드 — 스펙의 주요 기능 10~12번, 화면 구성 9~10번에 대응한다.
+
+---
+
+### Task 21: 커뮤니티 기능 DB 스키마 (profiles, roadmaps.is_public, milestone_reactions)
+
+**Files:**
+- Create: `supabase/migrations/0002_community.sql`
+- Modify: `types/models.ts` (Task 2에서 만든 파일 — `Roadmap`에 `is_public` 추가,
+  `Profile`/`MilestoneReaction` 타입 신설)
+
+**Interfaces:**
+- Consumes: Task 2의 `roadmaps`/`milestones`/`notification_settings` 테이블과
+  `handle_new_user` 트리거 함수
+- Produces: 테이블 `profiles`, `milestone_reactions`; `roadmaps.is_public` 컬럼.
+  TS 타입 `Profile`, `MilestoneReaction`; `Roadmap`에 `is_public: boolean` 추가.
+
+- [ ] **Step 1: 마이그레이션 SQL을 작성한다**
+
+```sql
+-- supabase/migrations/0002_community.sql
+create table if not exists public.profiles (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null unique references auth.users(id) on delete cascade,
+  display_name text not null,
+  show_on_leaderboard boolean not null default false,
+  created_at timestamptz not null default now()
+);
+
+alter table public.roadmaps add column if not exists is_public boolean not null default false;
+
+create table if not exists public.milestone_reactions (
+  id uuid primary key default gen_random_uuid(),
+  milestone_id uuid not null references public.milestones(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  unique (milestone_id, user_id)
+);
+
+alter table public.profiles enable row level security;
+alter table public.milestone_reactions enable row level security;
+
+-- 리더보드/공개 화면에서 다른 사람의 닉네임을 보여줘야 하므로 표시 이름은
+-- 누구나 읽을 수 있게 하고, 쓰기는 본인 것만 허용한다.
+create policy "profiles_read_all" on public.profiles
+  for select using (true);
+
+create policy "profiles_owner_insert" on public.profiles
+  for insert with check (auth.uid() = user_id);
+
+create policy "profiles_owner_update" on public.profiles
+  for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+-- 기존 roadmaps_owner/milestones_owner 정책(Task 2)은 그대로 두고, is_public인
+-- 로드맵/마일스톤을 "누구나"(로그인 여부 무관) 읽을 수 있는 정책을 추가한다.
+-- Postgres RLS는 같은 명령어에 대한 여러 정책을 OR로 합치므로 소유자든
+-- 공개 열람이든 둘 중 하나만 만족하면 통과한다.
+create policy "roadmaps_public_read" on public.roadmaps
+  for select using (is_public = true);
+
+create policy "milestones_public_read" on public.milestones
+  for select using (
+    exists (select 1 from public.roadmaps r where r.id = milestones.roadmap_id and r.is_public = true)
+  );
+
+-- 하이파이브는 공개 로드맵의 마일스톤에만, 로그인한 사용자가 자기 이름으로만
+-- 남기거나 지울 수 있다.
+create policy "milestone_reactions_public_read" on public.milestone_reactions
+  for select using (
+    exists (
+      select 1 from public.milestones m
+      join public.roadmaps r on r.id = m.roadmap_id
+      where m.id = milestone_reactions.milestone_id and r.is_public = true
+    )
+  );
+
+create policy "milestone_reactions_insert_own" on public.milestone_reactions
+  for insert with check (
+    auth.uid() = user_id
+    and exists (
+      select 1 from public.milestones m
+      join public.roadmaps r on r.id = m.roadmap_id
+      where m.id = milestone_reactions.milestone_id and r.is_public = true
+    )
+  );
+
+create policy "milestone_reactions_delete_own" on public.milestone_reactions
+  for delete using (auth.uid() = user_id);
+
+-- Task 2의 handle_new_user()에 프로필 기본 행 생성을 추가한다(트리거 자체는
+-- 그대로 두고 함수 본문만 교체 — CREATE TRIGGER를 다시 할 필요는 없다).
+-- 닉네임 기본값은 이메일의 "@" 앞부분.
+create or replace function public.handle_new_user()
+returns trigger as $$
+begin
+  insert into public.notification_settings (user_id, reminder_enabled, reminder_time)
+  values (new.id, true, '09:00')
+  on conflict (user_id) do nothing;
+
+  insert into public.profiles (user_id, display_name, show_on_leaderboard)
+  values (new.id, split_part(new.email, '@', 1), false)
+  on conflict (user_id) do nothing;
+
+  return new;
+end;
+$$ language plpgsql security definer set search_path = public;
+```
+
+- [ ] **Step 2: 마이그레이션을 적용한다**
+
+Run: `supabase db reset`
+Expected: 에러 없이 적용됨
+
+- [ ] **Step 3: 테이블/컬럼이 생겼는지 확인한다**
+
+Run:
+```bash
+psql "$DATABASE_URL" -c "select table_name from information_schema.tables where table_schema = 'public' and table_name in ('profiles','milestone_reactions');"
+psql "$DATABASE_URL" -c "select column_name from information_schema.columns where table_name = 'roadmaps' and column_name = 'is_public';"
+```
+Expected: 두 테이블과 `is_public` 컬럼이 각각 출력됨
+
+- [ ] **Step 4: 새 회원가입 시 프로필도 자동 생성되는지 확인한다**
+
+Supabase Studio에서 테스트 계정으로 가입한 뒤:
+```bash
+psql "$DATABASE_URL" -c "select display_name, show_on_leaderboard from public.profiles order by created_at desc limit 1;"
+```
+Expected: 방금 가입한 이메일의 `@` 앞부분이 `display_name`으로 들어가 있고
+`show_on_leaderboard`는 `false`
+
+- [ ] **Step 5: 타입을 갱신한다**
+
+```ts
+// types/models.ts — Roadmap 인터페이스에 필드 추가
+export interface Roadmap {
+  id: string;
+  user_id: string;
+  title: string;
+  description: string | null;
+  source: RoadmapSource;
+  status: RoadmapStatus;
+  is_public: boolean;
+  created_at: string;
+}
+```
+
+```ts
+// types/models.ts 맨 아래에 추가
+export interface Profile {
+  id: string;
+  user_id: string;
+  display_name: string;
+  show_on_leaderboard: boolean;
+  created_at: string;
+}
+
+export interface MilestoneReaction {
+  id: string;
+  milestone_id: string;
+  user_id: string;
+  created_at: string;
+}
+```
+
+- [ ] **Step 6: 커밋**
+
+```bash
+git add supabase/migrations/0002_community.sql types/models.ts
+git commit -m "feat: add community schema (profiles, public roadmaps, milestone reactions)"
+```
+
+---
+
+### Task 22: 프로필 CRUD + 설정 화면에 닉네임/리더보드 표시 추가
+
+**Files:**
+- Create: `lib/profiles.ts`
+- Modify: `app/(dashboard)/settings/page.tsx` (Task 14에서 만든 파일)
+- Test: `__tests__/profiles.test.ts`
+
+**Interfaces:**
+- Consumes: `Profile` (Task 21), `makeFakeClient` (Task 5)
+- Produces: `getProfile(client, userId): Promise<Profile>`,
+  `updateProfile(client, userId, patch): Promise<Profile>`
+
+- [ ] **Step 1: 실패하는 테스트를 작성한다**
+
+```ts
+// __tests__/profiles.test.ts
+import { getProfile, updateProfile } from '../lib/profiles';
+import { makeFakeClient } from '../test-utils/fakeSupabaseClient';
+
+test('getProfile returns the row for a user', async () => {
+  const row = { id: 'p1', user_id: 'u1', display_name: 'yoon', show_on_leaderboard: false };
+  const client = makeFakeClient([{ data: row, error: null }]);
+  const result = await getProfile(client, 'u1');
+  expect(result).toEqual(row);
+});
+
+test('updateProfile applies a partial patch and returns the updated row', async () => {
+  const row = { id: 'p1', user_id: 'u1', display_name: '새닉네임', show_on_leaderboard: true };
+  const client = makeFakeClient([{ data: row, error: null }]);
+  const result = await updateProfile(client, 'u1', { display_name: '새닉네임', show_on_leaderboard: true });
+  expect(result).toEqual(row);
+});
+
+test('updateProfile throws when supabase returns an error', async () => {
+  const client = makeFakeClient([{ data: null, error: new Error('update failed') }]);
+  await expect(updateProfile(client, 'u1', { display_name: 'x' })).rejects.toThrow('update failed');
+});
+```
+
+- [ ] **Step 2: 테스트 실행 → 실패 확인**
+
+Run: `npx jest profiles.test.ts`
+Expected: FAIL with "Cannot find module '../lib/profiles'"
+
+- [ ] **Step 3: 구현한다**
+
+```ts
+// lib/profiles.ts
+import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Profile } from '../types/models';
+
+export async function getProfile(client: SupabaseClient, userId: string): Promise<Profile> {
+  const { data, error } = await client.from('profiles').select('*').eq('user_id', userId).single();
+  if (error) throw error;
+  return data as Profile;
+}
+
+export async function updateProfile(
+  client: SupabaseClient,
+  userId: string,
+  patch: Partial<Pick<Profile, 'display_name' | 'show_on_leaderboard'>>
+): Promise<Profile> {
+  const { data, error } = await client.from('profiles').update(patch).eq('user_id', userId).select().single();
+  if (error) throw error;
+  return data as Profile;
+}
+```
+
+- [ ] **Step 4: 테스트 실행 → 통과 확인**
+
+Run: `npx jest profiles.test.ts`
+Expected: PASS (3 tests)
+
+- [ ] **Step 5: 설정 화면에 닉네임/리더보드 표시 항목을 추가한다**
+
+```tsx
+// app/(dashboard)/settings/page.tsx — import에 추가
+import { getProfile, updateProfile } from '../../../lib/profiles';
+```
+
+```tsx
+// 컴포넌트 안에 state 추가
+const [displayName, setDisplayName] = useState('');
+const [showOnLeaderboard, setShowOnLeaderboard] = useState(false);
+```
+
+```tsx
+// 기존 notification_settings를 불러오는 useEffect 안, setLoaded(true) 직전에 추가
+const profile = await getProfile(supabase, userId);
+setDisplayName(profile.display_name);
+setShowOnLeaderboard(profile.show_on_leaderboard);
+```
+
+```tsx
+// 컴포넌트 안에 핸들러 추가
+async function handleDisplayNameChange(value: string) {
+  setDisplayName(value);
+  if (!userId) return;
+  await updateProfile(supabase, userId, { display_name: value });
+}
+
+async function handleShowOnLeaderboardChange(value: boolean) {
+  setShowOnLeaderboard(value);
+  if (!userId) return;
+  await updateProfile(supabase, userId, { show_on_leaderboard: value });
+}
+```
+
+```tsx
+{/* 로그아웃 버튼 위, "계정" 카드 안에 추가 */}
+<div className="flex flex-col gap-2">
+  <label className="text-sm text-gray-600" htmlFor="display-name">
+    닉네임 (리더보드/공개 화면에 표시)
+  </label>
+  <input
+    id="display-name"
+    className="rounded-lg border p-2"
+    value={displayName}
+    onChange={(e) => handleDisplayNameChange(e.target.value)}
+  />
+</div>
+<label className="flex items-center gap-2">
+  <input
+    type="checkbox"
+    checked={showOnLeaderboard}
+    onChange={(e) => handleShowOnLeaderboardChange(e.target.checked)}
+  />
+  리더보드에 표시
+</label>
+```
+
+- [ ] **Step 6: 수동 확인**
+
+Run: `npm run dev` → 설정 페이지에 가입 시 자동 생성된 닉네임(이메일 앞부분)이
+보이는지, 닉네임을 바꾸고 새로고침해도 유지되는지, "리더보드에 표시"를 켜면
+`profiles.show_on_leaderboard`가 `true`로 바뀌는지 확인
+
+- [ ] **Step 7: 커밋**
+
+```bash
+git add lib/profiles.ts __tests__/profiles.test.ts app/\(dashboard\)/settings/page.tsx
+git commit -m "feat: add profile CRUD and nickname/leaderboard settings"
+```
+
+---
+
+### Task 23: 로드맵 공개 전환 + 공개 로드맵 보기 페이지
+
+**Files:**
+- Modify: `lib/roadmaps.ts` (Task 5에서 만든 파일에 함수를 추가한다)
+- Modify: `app/roadmap/[id]/page.tsx` (Task 9/11에서 만든 파일 — 공개 전환 토글 추가)
+- Create: `app/r/[id]/page.tsx`
+- Test: `__tests__/roadmaps.test.ts` (Task 5에서 만든 파일에 케이스를 추가한다)
+
+**Interfaces:**
+- Consumes: `listMilestones` (Task 6), `calculateProgress`, `milestoneStatus` (Task 4),
+  `computeNodePositions` (Task 11)
+- Produces: `setRoadmapPublic(client, roadmapId, isPublic): Promise<void>`
+
+- [ ] **Step 1: 실패하는 테스트를 추가한다**
+
+```ts
+// __tests__/roadmaps.test.ts 에 추가
+import { setRoadmapPublic } from '../lib/roadmaps';
+
+test('setRoadmapPublic updates the is_public flag', async () => {
+  const client = makeFakeClient([{ data: null, error: null }]);
+  await setRoadmapPublic(client, 'r1', true);
+  expect(client.from).toHaveBeenCalledWith('roadmaps');
+});
+```
+
+- [ ] **Step 2: 테스트 실행 → 실패 확인**
+
+Run: `npx jest roadmaps.test.ts`
+Expected: FAIL with "setRoadmapPublic is not a function"
+
+- [ ] **Step 3: 구현한다**
+
+```ts
+// lib/roadmaps.ts 에 추가
+export async function setRoadmapPublic(client: SupabaseClient, roadmapId: string, isPublic: boolean): Promise<void> {
+  const { error } = await client.from('roadmaps').update({ is_public: isPublic }).eq('id', roadmapId);
+  if (error) throw error;
+}
+```
+
+- [ ] **Step 4: 테스트 실행 → 통과 확인**
+
+Run: `npx jest roadmaps.test.ts`
+Expected: PASS (11 tests — 10 from before + 1 new)
+
+- [ ] **Step 5: 로드맵 상세 페이지에 공개 전환 토글을 추가한다**
+
+```tsx
+// app/roadmap/[id]/page.tsx — import에 추가
+import { setRoadmapPublic } from '../../../lib/roadmaps';
+```
+
+```tsx
+// 컴포넌트 안에 핸들러 추가
+async function handleTogglePublic(checked: boolean) {
+  if (!id) return;
+  await setRoadmapPublic(supabase, id, checked);
+  await load();
+}
+```
+
+```tsx
+{/* 헤더의 삭제 버튼 아래, 진행률 카드 위에 추가 */}
+<label className="flex items-center justify-between rounded-xl border p-3 text-sm">
+  <span>
+    공개 링크로 공유
+    {roadmap.is_public && <span className="ml-2 text-xs text-gray-500">/r/{roadmap.id}</span>}
+  </span>
+  <input type="checkbox" checked={roadmap.is_public} onChange={(e) => handleTogglePublic(e.target.checked)} />
+</label>
+```
+
+- [ ] **Step 6: 공개 로드맵 보기 페이지를 만든다** (로그인 여부와 무관하게
+접근 가능 — `useRequireAuth`를 쓰지 않는다. 편집/삭제/추가 UI는 전혀 없다)
+
+```tsx
+// app/r/[id]/page.tsx
+'use client';
+import { useEffect, useState } from 'react';
+import { useParams } from 'next/navigation';
+import { supabase } from '../../../lib/supabase';
+import { getRoadmap } from '../../../lib/roadmaps';
+import { listMilestones } from '../../../lib/milestones';
+import { calculateProgress, milestoneStatus } from '../../../lib/progress';
+import { computeNodePositions } from '../../../lib/timeline';
+import type { Roadmap, Milestone } from '../../../types/models';
+
+export default function PublicRoadmapPage() {
+  const { id } = useParams<{ id: string }>();
+  const [roadmap, setRoadmap] = useState<Roadmap | null>(null);
+  const [milestones, setMilestones] = useState<Milestone[]>([]);
+  const [notFound, setNotFound] = useState(false);
+
+  useEffect(() => {
+    if (!id) return;
+    getRoadmap(supabase, id)
+      .then(async (r) => {
+        setRoadmap(r);
+        setMilestones(await listMilestones(supabase, id));
+      })
+      .catch(() => setNotFound(true));
+  }, [id]);
+
+  if (notFound) {
+    return (
+      <div className="mx-auto max-w-md p-6 text-center text-gray-600">
+        찾을 수 없거나 비공개인 로드맵이에요.
+      </div>
+    );
+  }
+  if (!roadmap) return null;
+
+  const progress = calculateProgress(milestones);
+  const now = new Date();
+  const positions = computeNodePositions(milestones.length);
+  const pathHeight = 40 + milestones.length * 140 + 100;
+
+  return (
+    <div className="mx-auto max-w-2xl p-6">
+      <h1 className="text-xl font-bold">{roadmap.title}</h1>
+      <p className="text-sm text-gray-600">
+        전체 진행률 {progress.percent}% ({progress.completedCount}/{progress.totalCount})
+      </p>
+      <div className="relative mt-4" style={{ height: pathHeight }}>
+        {milestones.map((milestone, index) => {
+          const pos = positions[index];
+          const status = milestoneStatus(milestone, now);
+          return (
+            <div
+              key={milestone.id}
+              className="absolute flex -translate-x-1/2 flex-col items-center gap-1 text-center"
+              style={{ left: `${pos.xPercent * 100}%`, top: pos.y }}
+            >
+              <div
+                className={`flex h-14 w-14 items-center justify-center rounded-full font-semibold text-white ${
+                  status === 'done' ? 'bg-green-500' : status === 'overdue' ? 'bg-red-500' : 'bg-gray-200 !text-gray-700'
+                }`}
+              >
+                {index + 1}
+              </div>
+              <span className="text-sm font-medium">{milestone.title}</span>
+              <span className="text-xs text-gray-500">{milestone.due_date}</span>
+              {/* 하이파이브 버튼은 Task 24에서 이 자리에 추가한다 */}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+```
+
+`getRoadmap`이 RLS에 막혀 에러를 던지면(비공개거나 없는 id) `catch`에서
+`notFound`로 처리한다 — Task 21의 `roadmaps_public_read` 정책 덕분에, 소유자가
+아니어도 `is_public = true`인 로드맵은 이 쿼리가 통과된다.
+
+- [ ] **Step 7: 수동 확인**
+
+Run: `npm run dev` → 로드맵을 공개로 전환하고 `/r/<id>`를 시크릿 창(비로그인)으로
+열어서 타임라인이 읽기 전용으로 보이는지, 다시 비공개로 전환한 뒤 같은 링크로
+들어가면 "찾을 수 없거나 비공개" 문구가 뜨는지 확인
+
+- [ ] **Step 8: 커밋**
+
+```bash
+git add lib/roadmaps.ts __tests__/roadmaps.test.ts app/roadmap/\[id\]/page.tsx app/r/\[id\]/page.tsx
+git commit -m "feat: add public roadmap sharing"
+```
+
+---
+
+### Task 24: 마일스톤 하이파이브 리액션
+
+**Files:**
+- Create: `lib/reactions.ts`
+- Modify: `app/r/[id]/page.tsx` (Task 23에서 만든 파일)
+- Modify: `test-utils/fakeSupabaseClient.ts` (Task 5에서 만든 파일 — `FakeResult`에
+  `count` 필드를 추가한다)
+- Test: `__tests__/reactions.test.ts`
+
+**Interfaces:**
+- Consumes: `makeFakeClient` (Task 5)
+- Produces: `hasReacted(client, milestoneId, userId): Promise<boolean>`,
+  `getReactionCount(client, milestoneId): Promise<number>`,
+  `toggleReaction(client, milestoneId, userId): Promise<boolean>` (반환값은 토글 후
+  "지금 눌린 상태인지")
+
+- [ ] **Step 1: 실패하는 테스트를 작성한다**
+
+```ts
+// __tests__/reactions.test.ts
+import { hasReacted, getReactionCount, toggleReaction } from '../lib/reactions';
+import { makeFakeClient } from '../test-utils/fakeSupabaseClient';
+
+test('hasReacted returns true when a row exists', async () => {
+  const client = makeFakeClient([{ data: { id: 'x1' }, error: null }]);
+  expect(await hasReacted(client, 'm1', 'u1')).toBe(true);
+});
+
+test('hasReacted returns false when no row exists', async () => {
+  const client = makeFakeClient([{ data: null, error: null }]);
+  expect(await hasReacted(client, 'm1', 'u1')).toBe(false);
+});
+
+test('getReactionCount returns the count', async () => {
+  const client = makeFakeClient([{ data: null, error: null, count: 3 }]);
+  expect(await getReactionCount(client, 'm1')).toBe(3);
+});
+
+test('toggleReaction inserts and returns true when not yet reacted', async () => {
+  const client = makeFakeClient([
+    { data: null, error: null }, // hasReacted -> false
+    { data: null, error: null }, // insert
+  ]);
+  expect(await toggleReaction(client, 'm1', 'u1')).toBe(true);
+});
+
+test('toggleReaction deletes and returns false when already reacted', async () => {
+  const client = makeFakeClient([
+    { data: { id: 'x1' }, error: null }, // hasReacted -> true
+    { data: null, error: null }, // delete
+  ]);
+  expect(await toggleReaction(client, 'm1', 'u1')).toBe(false);
+});
+```
+
+- [ ] **Step 2: 테스트 실행 → 실패 확인**
+
+Run: `npx jest reactions.test.ts`
+Expected: FAIL with "Cannot find module '../lib/reactions'"
+
+- [ ] **Step 3: 구현한다**
+
+```ts
+// lib/reactions.ts
+import type { SupabaseClient } from '@supabase/supabase-js';
+
+export async function hasReacted(client: SupabaseClient, milestoneId: string, userId: string): Promise<boolean> {
+  const { data, error } = await client
+    .from('milestone_reactions')
+    .select('id')
+    .eq('milestone_id', milestoneId)
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (error) throw error;
+  return data !== null;
+}
+
+export async function getReactionCount(client: SupabaseClient, milestoneId: string): Promise<number> {
+  const { count, error } = await client
+    .from('milestone_reactions')
+    .select('id', { count: 'exact', head: true })
+    .eq('milestone_id', milestoneId);
+  if (error) throw error;
+  return count ?? 0;
+}
+
+export async function toggleReaction(client: SupabaseClient, milestoneId: string, userId: string): Promise<boolean> {
+  const already = await hasReacted(client, milestoneId, userId);
+  if (already) {
+    const { error } = await client
+      .from('milestone_reactions')
+      .delete()
+      .eq('milestone_id', milestoneId)
+      .eq('user_id', userId);
+    if (error) throw error;
+    return false;
+  }
+  const { error } = await client.from('milestone_reactions').insert({ milestone_id: milestoneId, user_id: userId });
+  if (error) throw error;
+  return true;
+}
+```
+
+`getReactionCount`의 가짜 클라이언트 테스트를 통과시키려면 `test-utils/fakeSupabaseClient.ts`의
+`FakeResult` 타입과 builder의 `then` 콜백에 `count` 필드를 함께 흘려보내야 한다 —
+아래처럼 한 줄만 고치면 된다.
+
+```ts
+// test-utils/fakeSupabaseClient.ts 수정
+export type FakeResult = { data: unknown; error: unknown; count?: number };
+// ...
+then: (resolve: any, reject: any) => Promise.resolve(result).then(resolve, reject),
+```
+(`FakeResult`에 `count`가 이미 있으니 `result` 객체를 그대로 resolve하는 기존
+`then` 구현은 고칠 필요가 없다 — 타입만 넓히면 된다.)
+
+- [ ] **Step 4: 테스트 실행 → 통과 확인**
+
+Run: `npx jest reactions.test.ts`
+Expected: PASS (5 tests)
+
+- [ ] **Step 5: 공개 로드맵 페이지에 하이파이브 버튼을 연결한다**
+
+```tsx
+// app/r/[id]/page.tsx — import에 추가
+import { hasReacted, getReactionCount, toggleReaction } from '../../../lib/reactions';
+```
+
+```tsx
+// 컴포넌트 안에 state/로직 추가
+const [userId, setUserId] = useState<string | null>(null);
+const [reactions, setReactions] = useState<Record<string, { count: number; reacted: boolean }>>({});
+
+useEffect(() => {
+  supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id ?? null));
+}, []);
+
+useEffect(() => {
+  if (milestones.length === 0) return;
+  Promise.all(
+    milestones.map(async (m) => ({
+      id: m.id,
+      count: await getReactionCount(supabase, m.id),
+      reacted: userId ? await hasReacted(supabase, m.id, userId) : false,
+    }))
+  ).then((results) => {
+    setReactions(Object.fromEntries(results.map((r) => [r.id, { count: r.count, reacted: r.reacted }])));
+  });
+}, [milestones, userId]);
+
+async function handleHighFive(milestoneId: string) {
+  if (!userId) return;
+  const nowReacted = await toggleReaction(supabase, milestoneId, userId);
+  setReactions((prev) => ({
+    ...prev,
+    [milestoneId]: { count: (prev[milestoneId]?.count ?? 0) + (nowReacted ? 1 : -1), reacted: nowReacted },
+  }));
+}
+```
+
+```tsx
+{/* 각 마일스톤 노드 안, "{milestone.due_date}" 아래에 추가 */}
+{userId ? (
+  <button
+    className={`mt-1 rounded-full border px-2 py-1 text-xs ${
+      reactions[milestone.id]?.reacted ? 'bg-orange-500 text-white' : 'bg-white text-gray-600'
+    }`}
+    onClick={() => handleHighFive(milestone.id)}
+  >
+    🖐 {reactions[milestone.id]?.count ?? 0}
+  </button>
+) : (
+  <span className="mt-1 text-xs text-gray-500">🖐 {reactions[milestone.id]?.count ?? 0}</span>
+)}
+```
+
+- [ ] **Step 6: 수동 확인**
+
+Run: `npm run dev` → 로그인한 두 계정으로 같은 공개 로드맵을 열어 서로의
+마일스톤에 하이파이브를 남기고 카운트가 올라가는지, 다시 누르면 취소(카운트가
+줄고 버튼이 원래 색으로 돌아옴)되는지, 로그아웃 상태에서는 버튼 없이 숫자만
+보이는지 확인
+
+- [ ] **Step 7: 커밋**
+
+```bash
+git add lib/reactions.ts __tests__/reactions.test.ts test-utils/fakeSupabaseClient.ts app/r/\[id\]/page.tsx
+git commit -m "feat: add milestone high-five reactions on public roadmaps"
+```
+
+---
+
+### Task 25: 리더보드
+
+**Files:**
+- Create: `lib/leaderboard.ts`
+- Create: `app/(dashboard)/leaderboard/page.tsx`
+- Modify: `app/(dashboard)/layout.tsx` (Task 7/14에서 만든 파일 — 네비게이션에
+  "리더보드" 추가)
+- Test: `__tests__/leaderboard.test.ts`
+
+**Interfaces:**
+- Consumes: `computeStreak` (Task 12), `makeFakeClient` (Task 5), `useRequireAuth` (Task 3)
+- Produces: `getLeaderboard(client, today): Promise<{ displayName: string; streak: number }[]>`
+
+- [ ] **Step 1: 실패하는 테스트를 작성한다**
+
+```ts
+// __tests__/leaderboard.test.ts
+import { getLeaderboard } from '../lib/leaderboard';
+import { makeFakeClient } from '../test-utils/fakeSupabaseClient';
+
+test('ranks profiles by streak, highest first', async () => {
+  const client = makeFakeClient([
+    {
+      data: [
+        { user_id: 'u1', display_name: '동언' },
+        { user_id: 'u2', display_name: '민수' },
+      ],
+      error: null,
+    }, // profiles where show_on_leaderboard = true
+    { data: [{ checkin_date: '2026-09-07' }], error: null }, // u1 checkins -> streak 1
+    {
+      data: [
+        { checkin_date: '2026-09-05' },
+        { checkin_date: '2026-09-06' },
+        { checkin_date: '2026-09-07' },
+      ],
+      error: null,
+    }, // u2 checkins -> streak 3
+  ]);
+  const result = await getLeaderboard(client, new Date('2026-09-07'));
+  expect(result).toEqual([
+    { displayName: '민수', streak: 3 },
+    { displayName: '동언', streak: 1 },
+  ]);
+});
+
+test('returns an empty array when nobody opted into the leaderboard', async () => {
+  const client = makeFakeClient([{ data: [], error: null }]);
+  expect(await getLeaderboard(client, new Date('2026-09-07'))).toEqual([]);
+});
+```
+
+- [ ] **Step 2: 테스트 실행 → 실패 확인**
+
+Run: `npx jest leaderboard.test.ts`
+Expected: FAIL with "Cannot find module '../lib/leaderboard'"
+
+- [ ] **Step 3: 구현한다**
+
+```ts
+// lib/leaderboard.ts
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { computeStreak } from './streak';
+
+export interface LeaderboardEntry {
+  displayName: string;
+  streak: number;
+}
+
+export async function getLeaderboard(client: SupabaseClient, today: Date): Promise<LeaderboardEntry[]> {
+  const { data: profiles, error } = await client
+    .from('profiles')
+    .select('user_id, display_name')
+    .eq('show_on_leaderboard', true);
+  if (error) throw error;
+
+  const entries = await Promise.all(
+    (profiles ?? []).map(async (p: { user_id: string; display_name: string }) => {
+      const { data: checkins, error: checkinError } = await client
+        .from('habit_checkins')
+        .select('checkin_date')
+        .eq('user_id', p.user_id);
+      if (checkinError) throw checkinError;
+      const streak = computeStreak((checkins ?? []).map((c: { checkin_date: string }) => c.checkin_date), today);
+      return { displayName: p.display_name, streak };
+    })
+  );
+
+  return entries.sort((a, b) => b.streak - a.streak);
+}
+```
+
+- [ ] **Step 4: 테스트 실행 → 통과 확인**
+
+Run: `npx jest leaderboard.test.ts`
+Expected: PASS (2 tests)
+
+- [ ] **Step 5: 리더보드 페이지를 만든다**
+
+```tsx
+// app/(dashboard)/leaderboard/page.tsx
+'use client';
+import { useEffect, useState } from 'react';
+import { supabase } from '../../../lib/supabase';
+import { useRequireAuth } from '../../../lib/useAuth';
+import { getLeaderboard, LeaderboardEntry } from '../../../lib/leaderboard';
+
+export default function LeaderboardPage() {
+  const userId = useRequireAuth();
+  const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
+
+  useEffect(() => {
+    if (!userId) return;
+    getLeaderboard(supabase, new Date()).then(setEntries);
+  }, [userId]);
+
+  return (
+    <div className="mx-auto max-w-md p-6">
+      <h1 className="text-xl font-bold">리더보드</h1>
+      <p className="mb-4 text-sm text-gray-500">리더보드에 표시하기로 한 사용자들의 스트릭 순위예요</p>
+      <ol className="space-y-2">
+        {entries.map((entry, index) => (
+          <li key={entry.displayName} className="flex items-center justify-between rounded-xl border p-3">
+            <span className="font-medium">
+              {index + 1}. {entry.displayName}
+            </span>
+            <span className="text-sm text-gray-600">{entry.streak}일 연속</span>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+```
+
+- [ ] **Step 6: 네비게이션에 리더보드 링크를 추가한다**
+
+```tsx
+// app/(dashboard)/layout.tsx 의 <nav> 안, "설정" 링크 뒤에 추가
+<Link href="/leaderboard">리더보드</Link>
+```
+
+- [ ] **Step 7: 수동 확인**
+
+Run: `npm run dev` → 설정에서 "리더보드에 표시"를 켠 계정 2개로 각각 스트릭을
+쌓은 뒤, 리더보드 페이지에서 스트릭이 높은 순서대로 닉네임이 나열되는지,
+표시를 끈 계정은 목록에서 빠지는지 확인
+
+- [ ] **Step 8: 커밋**
+
+```bash
+git add lib/leaderboard.ts __tests__/leaderboard.test.ts app/\(dashboard\)/leaderboard/page.tsx app/\(dashboard\)/layout.tsx
+git commit -m "feat: add streak leaderboard"
+```

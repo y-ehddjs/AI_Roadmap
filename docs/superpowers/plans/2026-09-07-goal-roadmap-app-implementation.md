@@ -193,7 +193,7 @@ PostgREST, `{SUPABASE_URL}/rest/v1/<테이블명>` — 와 (2) AI 호출처럼 A
 
 | 메서드 | 경로 | 용도 | 요청 | 응답 | 상태 코드 |
 |---|---|---|---|---|---|
-| GET | `/rest/v1/coaching_messages?select=*&user_id=eq.{userId}&order=created_at.desc` | `listMessages` — 코칭 메시지함 목록 | 없음 | `CoachingMessage[]` | 200 |
+| GET | `/rest/v1/coaching_messages?select=*,roadmaps(title)&user_id=eq.{userId}&order=created_at.desc` | `listMessages` — 코칭 메시지함 목록(각 메시지가 어느 로드맵 건지 제목을 같이 보여줌). `roadmap_id`가 `roadmaps.id`를 직접 참조하는 FK라 PostgREST가 `roadmaps(title)`로 한 번에 묶어준다 | 없음 | `CoachingMessageWithRoadmap[]` (= `CoachingMessage`에서 중첩된 `roadmaps`를 떼어내고 `roadmap_title: string`으로 평탄화) | 200 |
 | PATCH | `/rest/v1/coaching_messages?id=eq.{messageId}` | `markRead` — 메시지 클릭 시 읽음 처리 | `{ read_at: <ISO 시각> }` | 없음 | 204 |
 
 메시지 생성(INSERT)은 클라이언트 화면에서 직접 하지 않는다 — 아래 10번 표의
@@ -3282,7 +3282,13 @@ git commit -m "feat: add scheduled deadline and check-in reminder edge function"
 
 **Interfaces:**
 - Consumes: `CoachingMessage` (Task 2), `makeFakeClient` (Task 5), `useRequireAuth` (Task 3)
-- Produces: `listMessages(client, userId): Promise<CoachingMessage[]>`, `markRead(client, messageId): Promise<void>`
+- Produces: `listMessages(client, userId): Promise<CoachingMessageWithRoadmap[]>`
+  (`CoachingMessageWithRoadmap`는 `CoachingMessage`에 `roadmap_title: string`을 더한
+  타입 — 목업의 메시지함 화면이 각 메시지 아래에 "어느 로드맵" 메시지인지
+  제목을 같이 보여주는데, `coaching_messages`만 조회하면 `roadmap_id`만 있고
+  제목이 없어서 추가했다. `coaching_messages.roadmap_id`는 `roadmaps.id`를 직접
+  참조하는 FK라 — 커뮤니티/리더보드 때의 `profiles`/`roadmaps`와 달리 — PostgREST가
+  `roadmaps(title)`로 한 번에 묶어 가져와준다), `markRead(client, messageId): Promise<void>`
 
 - [ ] **Step 1: 실패하는 테스트를 작성한다**
 
@@ -3291,11 +3297,17 @@ git commit -m "feat: add scheduled deadline and check-in reminder edge function"
 import { listMessages, markRead } from '../lib/coaching';
 import { makeFakeClient } from '../test-utils/fakeSupabaseClient';
 
-test('listMessages returns rows ordered by newest first', async () => {
-  const rows = [{ id: 'c2' }, { id: 'c1' }];
+test('listMessages returns rows ordered by newest first, flattened with the roadmap title', async () => {
+  const rows = [
+    { id: 'c2', roadmap_id: 'r2', message: '두 번째', created_at: '2026-09-07T00:00:00Z', read_at: null, roadmaps: { title: '정보처리기사 자격증' } },
+    { id: 'c1', roadmap_id: 'r1', message: '첫 번째', created_at: '2026-09-06T00:00:00Z', read_at: null, roadmaps: { title: '10km 마라톤 완주하기' } },
+  ];
   const client = makeFakeClient([{ data: rows, error: null }]);
   const result = await listMessages(client, 'u1');
-  expect(result).toEqual(rows);
+  expect(result).toEqual([
+    { id: 'c2', roadmap_id: 'r2', message: '두 번째', created_at: '2026-09-07T00:00:00Z', read_at: null, roadmap_title: '정보처리기사 자격증' },
+    { id: 'c1', roadmap_id: 'r1', message: '첫 번째', created_at: '2026-09-06T00:00:00Z', read_at: null, roadmap_title: '10km 마라톤 완주하기' },
+  ]);
 });
 
 test('listMessages returns an empty array when data is null', async () => {
@@ -3321,14 +3333,21 @@ Expected: FAIL with "Cannot find module '../lib/coaching'"
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { CoachingMessage } from '../types/models';
 
-export async function listMessages(client: SupabaseClient, userId: string): Promise<CoachingMessage[]> {
+export interface CoachingMessageWithRoadmap extends CoachingMessage {
+  roadmap_title: string;
+}
+
+export async function listMessages(client: SupabaseClient, userId: string): Promise<CoachingMessageWithRoadmap[]> {
   const { data, error } = await client
     .from('coaching_messages')
-    .select('*')
+    .select('*, roadmaps(title)')
     .eq('user_id', userId)
     .order('created_at', { ascending: false });
   if (error) throw error;
-  return (data ?? []) as CoachingMessage[];
+  return (data ?? []).map((row: any) => {
+    const { roadmaps, ...rest } = row;
+    return { ...rest, roadmap_title: roadmaps?.title ?? '' } as CoachingMessageWithRoadmap;
+  });
 }
 
 export async function markRead(client: SupabaseClient, messageId: string): Promise<void> {
@@ -3353,12 +3372,11 @@ Expected: PASS (3 tests)
 import { useEffect, useState } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { useRequireAuth } from '../../../lib/useAuth';
-import { listMessages, markRead } from '../../../lib/coaching';
-import type { CoachingMessage } from '../../../types/models';
+import { listMessages, markRead, CoachingMessageWithRoadmap } from '../../../lib/coaching';
 
 export default function CoachingInboxPage() {
   const userId = useRequireAuth();
-  const [messages, setMessages] = useState<CoachingMessage[]>([]);
+  const [messages, setMessages] = useState<CoachingMessageWithRoadmap[]>([]);
 
   useEffect(() => {
     if (!userId) return;
@@ -3368,7 +3386,7 @@ export default function CoachingInboxPage() {
     load();
   }, [userId]);
 
-  async function handleOpen(message: CoachingMessage) {
+  async function handleOpen(message: CoachingMessageWithRoadmap) {
     if (message.read_at) return;
     await markRead(supabase, message.id);
     setMessages((prev) => prev.map((m) => (m.id === message.id ? { ...m, read_at: new Date().toISOString() } : m)));
@@ -3385,7 +3403,9 @@ export default function CoachingInboxPage() {
               onClick={() => handleOpen(item)}
             >
               <p>{item.message}</p>
-              <p className="text-xs text-gray-500">{item.created_at}</p>
+              <p className="text-xs text-gray-500">
+                {item.created_at} · {item.roadmap_title}
+              </p>
             </button>
           </li>
         ))}
@@ -3404,7 +3424,7 @@ Run: `npm run dev` → Task 18/19에서 발송된 코칭 메시지가 메시지�
 
 ```bash
 git add lib/coaching.ts __tests__/coaching.test.ts app/\(dashboard\)/coaching/page.tsx
-git commit -m "feat: add coaching inbox page"
+git commit -m "feat: add coaching inbox page with joined roadmap title"
 ```
 
 ---

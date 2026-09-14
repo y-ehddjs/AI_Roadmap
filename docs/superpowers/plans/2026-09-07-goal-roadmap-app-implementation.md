@@ -6,26 +6,32 @@
 제안하고 지연 시 자동으로 코칭 메시지를 보내는 반응형 웹 앱의 MVP를 만든다.
 
 **Architecture:** Next.js(App Router) 클라이언트가 Supabase(Postgres + Auth)에 직접
-CRUD 쿼리를 날리고, AI가 필요한 두 지점(로드맵 생성, 지연 코칭)은 Supabase Edge
-Function이 서버 사이드에서 Gemini API를 호출해 API 키를 클라이언트에 노출하지 않는다.
-알림은 서비스 워커 기반 Web Push API로 발송한다. 화면은 Tailwind CSS의 반응형
-브레이크포인트로 모바일/데스크톱 브라우저 모두를 지원한다.
+CRUD 쿼리를 날린다. API 키를 클라이언트에 못 내보내는 세 지점(로드맵 생성, 코칭 지연
+감지, 리마인더 발송)만 별도의 FastAPI(Python) 백엔드가 맡아 Gemini API와 Web Push를
+서버 사이드에서 호출한다 — 5주차에 프론트엔드/백엔드를 각각 도커 컨테이너로 분리하는
+과제 요구사항 때문에 (원래 계획이던 Supabase Edge Function 대신) 이 세 지점을 우리가
+직접 띄우는 FastAPI 컨테이너로 옮긴 것이며, 그 외 화면은 전부 그대로 Supabase 직접
+접근 구조를 유지한다(YAGNI). 화면은 Tailwind CSS의 반응형 브레이크포인트로
+모바일/데스크톱 브라우저 모두를 지원한다.
 
 **Tech Stack:** Next.js(React + TypeScript, App Router) + Tailwind CSS,
-@supabase/supabase-js, Supabase Edge Functions(Deno) + Google Gemini API,
-Web Push API(서비스 워커, `web-push` 라이브러리), Jest(next/jest preset, 앱 코드),
-Deno test runner(엣지 함수 코드).
+@supabase/supabase-js, FastAPI(Python) + `supabase-py`(service role) + Google Gemini
+API + APScheduler(주기 작업) + `pywebpush`, Jest(next/jest preset, 프론트엔드 코드),
+pytest(백엔드 코드).
 
 **Spec:** `docs/superpowers/specs/2026-09-07-goal-roadmap-app-design.md`
 
 ## Global Constraints
 
 - 플랫폼: 반응형 웹 (Next.js) — 별도 앱스토어 배포 없음, 브라우저로 접근
-- 백엔드: Supabase (Postgres + Auth + Realtime); Edge Function은 Deno 런타임에서 동작
+- 백엔드: 대부분의 CRUD는 Next.js 클라이언트가 Supabase(Postgres + Auth + Realtime)의
+  REST(PostgREST)에 직접 접근 — 커스텀 서버 없음. AI/알림 관련 세 지점(로드맵 생성,
+  코칭 지연 감지, 리마인더 발송)만 `backend/`의 FastAPI(Python) 앱이 맡고, Supabase에는
+  service role 키로 접근해 RLS를 우회한다. 이 세 곳 외로 백엔드 범위를 넓히지 않는다
 - 인증: 이메일/비밀번호만 (소셜 로그인 없음)
-- 알림: Web Push API (서비스 워커 + VAPID 키)
-- AI: Gemini API — 로드맵 생성 + 프로액티브 코칭. 코칭 트리거는 마감일 경과(`delay`)
-  하나만 구현하며 "정체" 판정은 범위 밖(YAGNI)
+- 알림: Web Push API (서비스 워커 + VAPID 키, 발송은 FastAPI 백엔드가 `pywebpush`로)
+- AI: Gemini API — 로드맵 생성 + 프로액티브 코칭, 둘 다 FastAPI 백엔드에서 호출.
+  코칭 트리거는 마감일 경과(`delay`) 하나만 구현하며 "정체" 판정은 범위 밖(YAGNI)
 - 마일스톤은 고정 마감일(달력형)이며, 한 사용자가 여러 로드맵을 동시에 진행 가능
 - 습관 스트릭은 로드맵과 무관하게 계정 전체로 통합 집계
 - 개인/포트폴리오 MVP 규모 — 핵심 로직(순수 함수, CRUD 계약)은 유닛 테스트로 검증하고
@@ -90,31 +96,36 @@ __tests__/
 supabase/
   migrations/
     0001_init.sql                    # 전체 스키마 + RLS
-  functions/
-    generate-roadmap/
-      index.ts                       # AI 로드맵 생성 엣지 함수
-      parse.ts                       # parseRoadmapResponse (순수 함수)
-      parse.test.ts                  # Deno test
-    check-coaching/
-      index.ts                       # 지연 감지 + 코칭 Web Push 발송 (스케줄)
-      select.ts                      # selectOverdueMilestones/buildCoachingPrompt
-      select.test.ts                 # Deno test
-    send-reminders/
-      index.ts                       # 리마인더 Web Push 발송 (스케줄)
-      schedule.ts                    # isReminderDue, selectMilestonesDueTomorrow (순수 함수)
-      schedule.test.ts               # Deno test
+backend/                              # FastAPI 백엔드 — AI/알림 3개 작업 전용, 5주차 도커 컨테이너
+  requirements.txt
+  Dockerfile
+  .dockerignore
+  app/
+    __init__.py
+    main.py                          # FastAPI 앱 + CORS + APScheduler 등록 + /internal/* 수동 트리거
+    generate_roadmap_parse.py         # parseRoadmapResponse (순수 함수)
+    generate_roadmap.py               # POST /generate-roadmap 라우터
+    check_coaching_select.py          # selectOverdueMilestones/buildCoachingPrompt (순수 함수)
+    check_coaching.py                 # run_check_coaching (매일 09:00 스케줄)
+    send_reminders_schedule.py        # isReminderDue/selectMilestonesDueTomorrow (순수 함수)
+    send_reminders.py                 # run_send_reminders (15분마다 스케줄)
+  tests/
+    __init__.py
+    test_generate_roadmap.py
+    test_check_coaching.py
+    test_send_reminders.py
 ```
 
 ---
 
 ## API 엔드포인트 명세
 
-이 앱은 커스텀 백엔드 서버가 없다. 화면(스펙 "화면 구성" 1~11번)이 실제로 부르는
-엔드포인트는 두 종류뿐이다: (1) Supabase가 테이블마다 자동으로 열어주는 REST —
-PostgREST, `{SUPABASE_URL}/rest/v1/<테이블명>` — 와 (2) AI 호출처럼 API 키를 서버
-밖으로 못 내보내는 두 지점만 직접 짠 Edge Function, `{SUPABASE_URL}/functions/v1/<함수명>`.
-아래 표는 각 화면이 어떤 엔드포인트를 어떤 요청/응답 모양으로 호출하는지 lib
-함수(위 태스크들에서 이미 구현한) 기준으로 정리한 것이다.
+화면(스펙 "화면 구성" 1~11번)이 실제로 부르는 엔드포인트는 두 종류다: (1) Supabase가
+테이블마다 자동으로 열어주는 REST — PostgREST, `{SUPABASE_URL}/rest/v1/<테이블명>` —
+가 대부분이고, (2) AI 호출처럼 API 키를 서버 밖으로 못 내보내는 세 지점(로드맵 생성,
+코칭 지연 감지, 리마인더 발송)만 직접 짠 FastAPI 백엔드, `{BACKEND_URL}/<경로>`
+(`backend/`, Task 16/18/19)다. 아래 표는 각 화면이 어떤 엔드포인트를 어떤 요청/응답
+모양으로 호출하는지 lib 함수(위 태스크들에서 이미 구현한) 기준으로 정리한 것이다.
 
 **공통 사항**
 
@@ -196,8 +207,8 @@ PostgREST, `{SUPABASE_URL}/rest/v1/<테이블명>` — 와 (2) AI 호출처럼 A
 | GET | `/rest/v1/coaching_messages?select=*,roadmaps(title)&user_id=eq.{userId}&order=created_at.desc` | `listMessages` — 코칭 메시지함 목록(각 메시지가 어느 로드맵 건지 제목을 같이 보여줌). `roadmap_id`가 `roadmaps.id`를 직접 참조하는 FK라 PostgREST가 `roadmaps(title)`로 한 번에 묶어준다 | 없음 | `CoachingMessageWithRoadmap[]` (= `CoachingMessage`에서 중첩된 `roadmaps`를 떼어내고 `roadmap_title: string`으로 평탄화) | 200 |
 | PATCH | `/rest/v1/coaching_messages?id=eq.{messageId}` | `markRead` — 메시지 클릭 시 읽음 처리 | `{ read_at: <ISO 시각> }` | 없음 | 204 |
 
-메시지 생성(INSERT)은 클라이언트 화면에서 직접 하지 않는다 — 아래 10번 표의
-`check-coaching` Edge Function이 서버 사이드(service role)로만 써넣는다.
+메시지 생성(INSERT)은 클라이언트 화면에서 직접 하지 않는다 — 아래 11번 표의
+FastAPI `check-coaching` 스케줄 작업이 서버 사이드(service role)로만 써넣는다.
 
 ### 8. 하이파이브 리액션 (화면 9, `lib/reactions.ts`, `milestone_reactions` 테이블)
 
@@ -229,18 +240,26 @@ PostgREST, `{SUPABASE_URL}/rest/v1/<테이블명>` — 와 (2) AI 호출처럼 A
 | GET | `/rest/v1/milestones?select=id&roadmap_id=eq.{roadmapId}` | `countHighFivesForRoadmap` 1단계 — 로드맵당 마일스톤 id 목록(없으면 하이파이브 조회 없이 바로 0) | 없음 | `{ id }[]` | 200 |
 | HEAD | `/rest/v1/milestone_reactions?select=id&milestone_id=in.({위 마일스톤 id 목록})` (`Prefer: count=exact`; "오늘 하이파이브순" 정렬이면 `&created_at=gte.{오늘 자정 ISO}` 추가) | `countHighFivesForRoadmap` 2단계 — 정렬 기준(오늘/누적)에 따른 하이파이브 개수 | 없음 | 없음(개수는 `Content-Range` 헤더) | 200 |
 
-### 11. Edge Functions (AI/알림 전용 커스텀 엔드포인트)
+### 11. FastAPI 백엔드 (AI/알림 전용 커스텀 엔드포인트, `backend/`)
+
+이 세 엔드포인트만 Supabase PostgREST가 아니라 `backend/`의 FastAPI 앱이 직접
+구현한다(Task 16/18/19). 기준 URL은 `{BACKEND_URL}` — 로컬 개발은
+`http://localhost:8000`, 배포 후에는 도커 컨테이너의 주소. `/generate-roadmap`만
+프론트엔드가 브라우저에서 직접 호출하고(그래서 FastAPI 쪽에 CORS 허용이 있다),
+나머지 둘은 APScheduler가 프로세스 내부에서 주기적으로 호출하며 `/internal/*`
+경로는 스케줄을 기다리지 않고 수동으로 테스트하기 위한 것이라 프론트엔드는
+호출하지 않는다.
 
 | 메서드 | 경로 | 화면/트리거 | 요청 | 응답 | 상태 코드 |
 |---|---|---|---|---|---|
-| POST | `/functions/v1/generate-roadmap` | 화면 3 — AI 로드맵 생성 플로우 | `{ user_id, title, description? }` | `{ roadmap_id }` | 200, 502(Gemini 호출 실패 또는 응답 파싱 실패), 500(DB insert 실패 — 마일스톤 insert 실패 시 방금 만든 로드맵도 롤백 삭제한 뒤 응답) |
-| POST | `/functions/v1/check-coaching` | 서버 스케줄(매일, 화면 7 메시지의 생성원) — Gemini로 격려 메시지를 만들어 `coaching_messages`에 쓰고 Web Push 발송 | 없음(cron이 인자 없이 호출) | `{ processed: <처리한 지연 마일스톤 수> }` | 200, 500(마일스톤 조회 실패) |
-| POST | `/functions/v1/send-reminders` | 서버 스케줄(15분마다) — 마감일 임박/체크인 유도 Web Push 발송 | 없음(cron이 인자 없이 호출) | `{ sent: <발송한 알림 수> }` | 200, 500(설정 조회 실패) |
+| POST | `{BACKEND_URL}/generate-roadmap` | 화면 3 — AI 로드맵 생성 플로우(프론트엔드가 `fetch`로 직접 호출) | `{ user_id, title, description? }` | `{ roadmap_id }` | 200, 502(Gemini 호출 실패 또는 응답 파싱 실패), 500(DB insert 실패 — 마일스톤 insert 실패 시 방금 만든 로드맵도 롤백 삭제한 뒤 응답) |
+| POST | `{BACKEND_URL}/internal/check-coaching` | 화면 7 메시지의 생성원 — 평소엔 APScheduler가 매일 09:00에 내부적으로 실행, 이 경로는 수동 테스트용 | 없음 | `{ processed: <처리한 지연 마일스톤 수> }` | 200, 500(마일스톤 조회 실패) |
+| POST | `{BACKEND_URL}/internal/send-reminders` | 마감일 임박/체크인 유도 Web Push 발송원 — 평소엔 APScheduler가 15분마다 내부적으로 실행, 이 경로는 수동 테스트용 | 없음 | `{ sent: <발송한 알림 수> }` | 200, 500(설정 조회 실패) |
 
-두 스케줄 함수는 화면이 직접 호출하는 게 아니라 `supabase functions schedule`로
-등록된 cron이 서버 사이드에서만 호출하며, 응답을 보는 사람도 없다 — 표에 넣은
-이유는 이 함수들이 화면 7의 코칭 메시지와 Web Push 알림의 실제 생성원이기
-때문이다.
+두 스케줄 작업은 화면이 직접 호출하는 게 아니라 FastAPI 앱 안에 등록된
+APScheduler(`CronTrigger(hour=9, minute=0)` / `IntervalTrigger(minutes=15)`)가
+프로세스 내부에서만 실행하며, 응답을 보는 사람도 없다 — 표에 넣은 이유는 이
+작업들이 화면 7의 코칭 메시지와 Web Push 알림의 실제 생성원이기 때문이다.
 
 ---
 
@@ -275,7 +294,6 @@ const createJestConfig = nextJest({ dir: './' });
 
 const customJestConfig = {
   testEnvironment: 'jsdom',
-  testPathIgnorePatterns: ['/node_modules/', '/supabase/functions/'],
 };
 
 module.exports = createJestConfig(customJestConfig);
@@ -284,9 +302,11 @@ module.exports = createJestConfig(customJestConfig);
 `package.json`의 `scripts`에 추가:
 
 ```json
-"test": "jest",
-"test:functions": "deno test supabase/functions"
+"test": "jest"
 ```
+
+(`backend/`는 별도의 Python 프로젝트라 이 `package.json`과 무관하게 `cd backend && python
+-m pytest`로 따로 테스트한다 — Task 16 참고.)
 
 - [ ] **Step 3: 실패하는 테스트를 작성한다**
 
@@ -2569,193 +2589,312 @@ git commit -m "feat: add progress dashboard page"
 
 ---
 
-### Task 16: Edge Function `generate-roadmap` — AI 로드맵 생성
+### Task 16: FastAPI 백엔드 뼈대 + `POST /generate-roadmap` — AI 로드맵 생성
+
+이 태스크가 `backend/` FastAPI 프로젝트의 첫 태스크라, AI 호출 로직과 함께 백엔드
+프로젝트 자체의 뼈대(의존성, Dockerfile, 앱 진입점)도 같이 만든다. 이후 Task 18/19는
+이 뼈대에 라우터/스케줄 작업을 더하기만 한다.
 
 **Files:**
-- Create: `supabase/functions/generate-roadmap/parse.ts`
-- Create: `supabase/functions/generate-roadmap/parse.test.ts`
-- Create: `supabase/functions/generate-roadmap/index.ts`
+- Create: `backend/requirements.txt`
+- Create: `backend/Dockerfile`
+- Create: `backend/.dockerignore`
+- Create: `backend/app/__init__.py`
+- Create: `backend/app/main.py`
+- Create: `backend/app/generate_roadmap_parse.py`
+- Create: `backend/app/generate_roadmap.py`
+- Create: `backend/tests/__init__.py`
+- Create: `backend/tests/test_generate_roadmap.py`
 
 **Interfaces:**
-- Produces: `parseRoadmapResponse(rawText: string): { title: string; due_date: string; order_index: number }[]`
+- Produces: `parse_roadmap_response(raw_text: str) -> list[ParsedMilestone]` (순수 함수,
+  `ParsedMilestone`는 `title`/`due_date`/`order_index` 필드를 가진 dataclass),
+  FastAPI 라우터 `POST /generate-roadmap` (Task 17이 프론트엔드에서 `fetch`로 호출)
 
-- [ ] **Step 1: 실패하는 Deno 테스트를 작성한다**
+- [ ] **Step 1: FastAPI 프로젝트 뼈대를 만든다**
 
-```ts
-// supabase/functions/generate-roadmap/parse.test.ts
-import { assertEquals, assertThrows } from 'https://deno.land/std@0.208.0/assert/mod.ts';
-import { parseRoadmapResponse } from './parse.ts';
-
-Deno.test('parses a valid JSON array of milestones', () => {
-  const raw = JSON.stringify([
-    { title: '1km 완주', due_date: '2026-10-01' },
-    { title: '3km 완주', due_date: '2026-10-15' },
-  ]);
-  const result = parseRoadmapResponse(raw);
-  assertEquals(result, [
-    { title: '1km 완주', due_date: '2026-10-01', order_index: 0 },
-    { title: '3km 완주', due_date: '2026-10-15', order_index: 1 },
-  ]);
-});
-
-Deno.test('throws when the response is not valid JSON', () => {
-  assertThrows(() => parseRoadmapResponse('not json'), Error, 'valid JSON');
-});
-
-Deno.test('throws when a milestone is missing due_date', () => {
-  const raw = JSON.stringify([{ title: 'only title' }]);
-  assertThrows(() => parseRoadmapResponse(raw), Error, 'missing title or due_date');
-});
-
-Deno.test('sorts milestones by due_date before assigning order_index, regardless of response order', () => {
-  const raw = JSON.stringify([
-    { title: '3km 완주', due_date: '2026-10-15' },
-    { title: '1km 완주', due_date: '2026-10-01' },
-  ]);
-  const result = parseRoadmapResponse(raw);
-  assertEquals(result, [
-    { title: '1km 완주', due_date: '2026-10-01', order_index: 0 },
-    { title: '3km 완주', due_date: '2026-10-15', order_index: 1 },
-  ]);
-});
+```txt
+# backend/requirements.txt
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+httpx==0.27.2
+supabase==2.9.1
+pywebpush==2.0.1
+apscheduler==3.10.4
+pytest==8.3.3
 ```
 
-- [ ] **Step 2: 테스트 실행 → 실패 확인**
+```dockerfile
+# backend/Dockerfile
+FROM python:3.12-slim
 
-Run: `deno test supabase/functions/generate-roadmap/parse.test.ts`
-Expected: FAIL — `parse.ts` module not found
+WORKDIR /app
 
-- [ ] **Step 3: 구현한다**
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-```ts
-// supabase/functions/generate-roadmap/parse.ts
-export interface ParsedMilestone {
-  title: string;
-  due_date: string;
-  order_index: number;
-}
+COPY app ./app
 
-export function parseRoadmapResponse(rawText: string): ParsedMilestone[] {
-  let json: unknown;
-  try {
-    json = JSON.parse(rawText);
-  } catch {
-    throw new Error('AI response was not valid JSON');
-  }
-  if (!Array.isArray(json)) {
-    throw new Error('AI response must be a JSON array of milestones');
-  }
-  const withoutOrder = json.map((item, index) => {
-    if (
-      typeof item !== 'object' ||
-      item === null ||
-      typeof (item as Record<string, unknown>).title !== 'string' ||
-      typeof (item as Record<string, unknown>).due_date !== 'string'
-    ) {
-      throw new Error(`Milestone at index ${index} is missing title or due_date`);
-    }
-    return {
-      title: (item as Record<string, string>).title,
-      due_date: (item as Record<string, string>).due_date,
-    };
-  });
-  // The model isn't guaranteed to return milestones in chronological order;
-  // sort by due_date so order_index (and the timeline it drives) is always
-  // date-ordered regardless of response order.
-  return withoutOrder
-    .sort((a, b) => a.due_date.localeCompare(b.due_date))
-    .map((m, index) => ({ ...m, order_index: index }));
-}
+EXPOSE 8000
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 ```
 
-- [ ] **Step 4: 테스트 실행 → 통과 확인**
+```txt
+# backend/.dockerignore
+__pycache__/
+*.pyc
+.pytest_cache/
+tests/
+.venv/
+```
 
-Run: `deno test supabase/functions/generate-roadmap/parse.test.ts`
+```python
+# backend/app/__init__.py
+```
+
+```python
+# backend/app/main.py
+import os
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from .generate_roadmap import router as generate_roadmap_router
+
+app = FastAPI(title="goal-roadmap-app backend")
+
+# 프론트엔드(Next.js)가 별도 도커 컨테이너에서 이 백엔드를 브라우저 fetch로
+# 직접 호출하므로, Supabase Edge Function 때는 필요 없던 CORS 허용이 필요하다.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[os.environ.get("FRONTEND_ORIGIN", "http://localhost:3000")],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(generate_roadmap_router)
+
+
+@app.get("/health")
+def health() -> dict[str, str]:
+    return {"status": "ok"}
+```
+
+```python
+# backend/tests/__init__.py
+```
+
+Run: `cd backend && python3 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt`
+Expected: 의존성이 에러 없이 설치됨
+
+- [ ] **Step 2: 실패하는 테스트를 작성한다** (`parse_roadmap_response` 순수 함수 —
+Deno 버전의 4개 케이스를 그대로 이식)
+
+```python
+# backend/tests/test_generate_roadmap.py
+import pytest
+
+from app.generate_roadmap_parse import parse_roadmap_response
+
+
+def test_parses_a_valid_json_array_of_milestones():
+    raw = '[{"title": "1km 완주", "due_date": "2026-10-01"}, {"title": "3km 완주", "due_date": "2026-10-15"}]'
+    result = parse_roadmap_response(raw)
+    assert [(m.title, m.due_date, m.order_index) for m in result] == [
+        ("1km 완주", "2026-10-01", 0),
+        ("3km 완주", "2026-10-15", 1),
+    ]
+
+
+def test_raises_when_the_response_is_not_valid_json():
+    with pytest.raises(ValueError, match="valid JSON"):
+        parse_roadmap_response("not json")
+
+
+def test_raises_when_a_milestone_is_missing_due_date():
+    with pytest.raises(ValueError, match="missing title or due_date"):
+        parse_roadmap_response('[{"title": "only title"}]')
+
+
+def test_sorts_milestones_by_due_date_before_assigning_order_index():
+    raw = '[{"title": "3km 완주", "due_date": "2026-10-15"}, {"title": "1km 완주", "due_date": "2026-10-01"}]'
+    result = parse_roadmap_response(raw)
+    assert [(m.title, m.due_date, m.order_index) for m in result] == [
+        ("1km 완주", "2026-10-01", 0),
+        ("3km 완주", "2026-10-15", 1),
+    ]
+```
+
+- [ ] **Step 3: 테스트 실행 → 실패 확인**
+
+Run: `cd backend && . .venv/bin/activate && python -m pytest tests/test_generate_roadmap.py -v`
+Expected: FAIL with "ModuleNotFoundError: No module named 'app.generate_roadmap_parse'"
+
+- [ ] **Step 4: 순수 함수를 구현한다** (Deno 버전의 `parse.ts`에 대응 — 환경변수나
+네트워크 호출이 전혀 없는 파일이라 테스트 임포트가 안전하다)
+
+```python
+# backend/app/generate_roadmap_parse.py
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+
+
+@dataclass
+class ParsedMilestone:
+    title: str
+    due_date: str
+    order_index: int
+
+
+def parse_roadmap_response(raw_text: str) -> list[ParsedMilestone]:
+    try:
+        data = json.loads(raw_text)
+    except json.JSONDecodeError as exc:
+        raise ValueError("AI response was not valid JSON") from exc
+    if not isinstance(data, list):
+        raise ValueError("AI response must be a JSON array of milestones")
+
+    without_order: list[dict] = []
+    for index, item in enumerate(data):
+        title = item.get("title") if isinstance(item, dict) else None
+        due_date = item.get("due_date") if isinstance(item, dict) else None
+        if not isinstance(title, str) or not isinstance(due_date, str):
+            raise ValueError(f"Milestone at index {index} is missing title or due_date")
+        without_order.append({"title": title, "due_date": due_date})
+
+    # 모델이 마일스톤을 항상 날짜순으로 돌려준다는 보장이 없어서, order_index를
+    # 매기기 전에 due_date로 먼저 정렬한다 — 응답 순서가 뒤섞여도 타임라인은
+    # 항상 날짜순으로 보이게 하기 위함.
+    without_order.sort(key=lambda m: m["due_date"])
+    return [
+        ParsedMilestone(title=m["title"], due_date=m["due_date"], order_index=i)
+        for i, m in enumerate(without_order)
+    ]
+```
+
+- [ ] **Step 5: 테스트 실행 → 통과 확인**
+
+Run: `cd backend && . .venv/bin/activate && python -m pytest tests/test_generate_roadmap.py -v`
 Expected: PASS (4 tests)
 
-- [ ] **Step 5: 엣지 함수 핸들러를 작성한다**
+- [ ] **Step 6: FastAPI 라우터 핸들러를 작성한다** (Deno 버전의 `index.ts`에 대응.
+환경변수 읽기는 함수 본문 안에서 하고 모듈 최상단에서 하지 않는다 — 위 pytest처럼
+이 파일을 임포트만 할 때 환경변수가 없어도 에러가 나지 않게 하기 위함)
 
-```ts
-// supabase/functions/generate-roadmap/index.ts
-import { serve } from 'https://deno.land/std@0.208.0/http/server.ts';
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { parseRoadmapResponse } from './parse.ts';
+```python
+# backend/app/generate_roadmap.py
+from __future__ import annotations
 
-const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY')!;
-const GEMINI_MODEL = 'gemini-2.5-flash';
-const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
-const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+import os
+from datetime import date
 
-serve(async (req) => {
-  const { user_id, title, description } = await req.json();
+import httpx
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+from supabase import create_client
 
-  const today = new Date().toISOString().slice(0, 10);
-  const prompt = `오늘 날짜: ${today}\n사용자의 목표: "${title}"\n추가 설명: "${description ?? ''}"\n이 목표를 달성하기 위한 마일스톤을 5~8개, 각 마일스톤의 title과 due_date(YYYY-MM-DD, 위 오늘 날짜를 기준으로 합리적인 간격을 두고 이후 날짜로)로 구성된 JSON 배열로만 응답해. 다른 설명 텍스트는 포함하지 마.`;
+from .generate_roadmap_parse import parse_roadmap_response
 
-  const aiResponse = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
-    {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { maxOutputTokens: 1024 },
-      }),
-    }
-  );
+GEMINI_MODEL = "gemini-2.5-flash"
 
-  if (!aiResponse.ok) {
-    return new Response(JSON.stringify({ error: 'AI request failed' }), { status: 502 });
-  }
+router = APIRouter()
 
-  const aiJson = await aiResponse.json();
-  const rawText = aiJson.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
 
-  let milestones;
-  try {
-    milestones = parseRoadmapResponse(rawText);
-  } catch (err) {
-    return new Response(JSON.stringify({ error: (err as Error).message }), { status: 502 });
-  }
+class GenerateRoadmapRequest(BaseModel):
+    user_id: str
+    title: str
+    description: str | None = None
 
-  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-  const { data: roadmap, error: roadmapError } = await supabase
-    .from('roadmaps')
-    .insert({ user_id, title, description, source: 'ai', status: 'active' })
-    .select()
-    .single();
-  if (roadmapError) {
-    return new Response(JSON.stringify({ error: roadmapError.message }), { status: 500 });
-  }
+class GenerateRoadmapResponse(BaseModel):
+    roadmap_id: str
 
-  const { error: milestonesError } = await supabase.from('milestones').insert(
-    milestones.map((m) => ({
-      roadmap_id: roadmap.id,
-      title: m.title,
-      due_date: m.due_date,
-      order_index: m.order_index,
-      status: 'pending',
-    }))
-  );
-  if (milestonesError) {
-    // 마일스톤 insert가 실패하면 방금 만든 로드맵만 덩그러니 남는다(마일스톤 0개짜리
-    // 고아 로드맵) - 실패를 알리기 전에 롤백 삼아 지운다.
-    await supabase.from('roadmaps').delete().eq('id', roadmap.id);
-    return new Response(JSON.stringify({ error: milestonesError.message }), { status: 500 });
-  }
 
-  return new Response(JSON.stringify({ roadmap_id: roadmap.id }), { status: 200 });
-});
+@router.post("/generate-roadmap", response_model=GenerateRoadmapResponse)
+async def generate_roadmap(payload: GenerateRoadmapRequest) -> GenerateRoadmapResponse:
+    gemini_api_key = os.environ["GEMINI_API_KEY"]
+    supabase_url = os.environ["SUPABASE_URL"]
+    supabase_service_role_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+
+    today = date.today().isoformat()
+    prompt = (
+        f'오늘 날짜: {today}\n'
+        f'사용자의 목표: "{payload.title}"\n'
+        f'추가 설명: "{payload.description or ""}"\n'
+        "이 목표를 달성하기 위한 마일스톤을 5~8개, 각 마일스톤의 title과 "
+        "due_date(YYYY-MM-DD, 위 오늘 날짜를 기준으로 합리적인 간격을 두고 이후 날짜로)로 "
+        "구성된 JSON 배열로만 응답해. 다른 설명 텍스트는 포함하지 마."
+    )
+
+    async with httpx.AsyncClient() as client:
+        ai_response = await client.post(
+            f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent",
+            params={"key": gemini_api_key},
+            json={
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {"maxOutputTokens": 1024},
+            },
+        )
+
+    if ai_response.status_code != 200:
+        raise HTTPException(status_code=502, detail="AI request failed")
+
+    ai_json = ai_response.json()
+    raw_text = (
+        ai_json.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+    )
+
+    try:
+        milestones = parse_roadmap_response(raw_text)
+    except ValueError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    supabase = create_client(supabase_url, supabase_service_role_key)
+
+    roadmap = (
+        supabase.table("roadmaps")
+        .insert(
+            {
+                "user_id": payload.user_id,
+                "title": payload.title,
+                "description": payload.description,
+                "source": "ai",
+                "status": "active",
+            }
+        )
+        .execute()
+    ).data[0]
+
+    try:
+        supabase.table("milestones").insert(
+            [
+                {
+                    "roadmap_id": roadmap["id"],
+                    "title": m.title,
+                    "due_date": m.due_date,
+                    "order_index": m.order_index,
+                    "status": "pending",
+                }
+                for m in milestones
+            ]
+        ).execute()
+    except Exception as exc:
+        # 마일스톤 insert가 실패하면 방금 만든 로드맵만 덩그러니 남는다(마일스톤 0개짜리
+        # 고아 로드맵) - 실패를 알리기 전에 롤백 삼아 지운다.
+        supabase.table("roadmaps").delete().eq("id", roadmap["id"]).execute()
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    return GenerateRoadmapResponse(roadmap_id=roadmap["id"])
 ```
 
-- [ ] **Step 6: 배포하고 수동 확인**
+- [ ] **Step 7: 로컬에서 띄우고 수동 확인**
 
-Run: `supabase functions deploy generate-roadmap`, then:
+Run: `cd backend && . .venv/bin/activate && GEMINI_API_KEY=... SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... uvicorn app.main:app --reload`, then:
 
 ```bash
-curl -X POST "$SUPABASE_URL/functions/v1/generate-roadmap" \
-  -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
+curl -X POST "http://localhost:8000/generate-roadmap" \
   -H "content-type: application/json" \
   -d '{"user_id":"<test-user-id>","title":"3개월 안에 10km 마라톤 완주하기"}'
 ```
@@ -2764,11 +2903,11 @@ Expected: `{"roadmap_id": "..."}` 응답과 함께 `roadmaps`/`milestones`에 �
 `milestones` insert를 일부러 실패시켜보고(예: 마이그레이션 전에 호출) `roadmaps`에도
 고아 행이 안 남고 같이 롤백되는지 확인
 
-- [ ] **Step 7: 커밋**
+- [ ] **Step 8: 커밋**
 
 ```bash
-git add supabase/functions/generate-roadmap
-git commit -m "feat: add AI roadmap generation edge function"
+git add backend/
+git commit -m "feat: bootstrap FastAPI backend and add AI roadmap generation endpoint"
 ```
 
 ---
@@ -2779,9 +2918,16 @@ git commit -m "feat: add AI roadmap generation edge function"
 - Modify: `app/roadmap/create/page.tsx`
 
 **Interfaces:**
-- Consumes: `generate-roadmap` edge function (Task 16), `supabase.functions.invoke`
+- Consumes: `POST /generate-roadmap` (Task 16의 FastAPI 백엔드 — Supabase Edge Function이
+  아니라 별도 `backend/` 컨테이너의 엔드포인트라서 `supabase.functions.invoke` 대신
+  일반 `fetch()`로 호출한다)
 
 - [ ] **Step 1: 방식 선택 토글과 AI 제출 플로우를 추가한다**
+
+```tsx
+// app/roadmap/create/page.tsx 상단, 다른 상수 선언 옆에 추가
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL as string;
+```
 
 ```tsx
 // app/roadmap/create/page.tsx 상단부에 추가
@@ -2791,15 +2937,19 @@ const [aiError, setAiError] = useState<string | null>(null);
 
 async function handleAiSubmit() {
   if (!userId || !title) return;
-  const { data, error } = await supabase.functions.invoke('generate-roadmap', {
-    body: { user_id: userId, title, description: aiDescription },
-  });
-  if (error || !data?.roadmap_id) {
+  try {
+    const response = await fetch(`${BACKEND_URL}/generate-roadmap`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ user_id: userId, title, description: aiDescription }),
+    });
+    if (!response.ok) throw new Error('AI request failed');
+    const data = await response.json();
+    router.replace(`/roadmap/${data.roadmap_id}`);
+  } catch {
     setAiError('AI 생성에 실패했어요. 직접 입력으로 만들어주세요.');
     setMode('manual');
-    return;
   }
-  router.replace(`/roadmap/${data.roadmap_id}`);
 }
 ```
 
@@ -2871,9 +3021,11 @@ state와 함수를 그대로 재사용한다 (같은 파일 안이므로 이미 
 
 - [ ] **Step 2: 수동 확인**
 
-Run: `npm run dev` → "AI가 만들어줘" 선택 후 목표를 입력해 제출 → 로드맵 상세로
-이동하며 AI가 만든 마일스톤들이 보이는지 확인. Edge Function URL을 일시적으로 틀리게
-바꿔 실패를 재현했을 때 수동 입력 폼으로 폴백되는지도 확인
+Run: `backend/`에서 `uvicorn app.main:app --reload` (Task 16 참고), 프론트엔드
+`.env.local`에 `NEXT_PUBLIC_BACKEND_URL=http://localhost:8000` 넣고 `npm run dev` →
+"AI가 만들어줘" 선택 후 목표를 입력해 제출 → 로드맵 상세로 이동하며 AI가 만든
+마일스톤들이 보이는지 확인. `NEXT_PUBLIC_BACKEND_URL`을 일시적으로 틀리게 바꿔
+실패를 재현했을 때 수동 입력 폼으로 폴백되는지도 확인
 
 - [ ] **Step 3: 커밋**
 
@@ -2884,404 +3036,546 @@ git commit -m "feat: wire AI roadmap generation into create page with manual fal
 
 ---
 
-### Task 18: Edge Function `check-coaching` — 지연 감지 + Web Push 코칭 발송
+### Task 18: FastAPI 스케줄 작업 `check-coaching` — 지연 감지 + Web Push 코칭 발송
 
 **Files:**
-- Create: `supabase/functions/check-coaching/select.ts`
-- Create: `supabase/functions/check-coaching/select.test.ts`
-- Create: `supabase/functions/check-coaching/index.ts`
+- Create: `backend/app/check_coaching_select.py`
+- Create: `backend/app/check_coaching.py`
+- Create: `backend/tests/test_check_coaching.py`
+- Modify: `backend/app/main.py` (Task 16에서 만든 파일 — APScheduler로 이 작업을
+  매일 09:00에 등록하고, 수동 테스트용 트리거 엔드포인트도 하나 둔다)
 
 **Interfaces:**
 - Consumes: `notification_settings.push_subscription` (Task 2)
-- Produces: `selectOverdueMilestones(milestones, now): MilestoneForCoaching[]`, `buildCoachingPrompt(milestone): string`
+- Produces: `select_overdue_milestones(milestones, now) -> list[MilestoneForCoaching]`,
+  `build_coaching_prompt(milestone) -> str`, `run_check_coaching() -> int`
+  (처리한 지연 마일스톤 개수를 반환하는 async 함수 — 스케줄러와 수동 트리거
+  엔드포인트가 둘 다 이 함수를 호출한다)
 
-- [ ] **Step 1: 실패하는 Deno 테스트를 작성한다**
+- [ ] **Step 1: 실패하는 테스트를 작성한다** (Deno 버전의 3개 케이스를 그대로 이식)
 
-```ts
-// supabase/functions/check-coaching/select.test.ts
-import { assertEquals } from 'https://deno.land/std@0.208.0/assert/mod.ts';
-import { selectOverdueMilestones, buildCoachingPrompt } from './select.ts';
+```python
+# backend/tests/test_check_coaching.py
+from dataclasses import replace
+from datetime import datetime
 
-const base = { id: 'm1', roadmap_id: 'r1', user_id: 'u1', title: '5km 완주', due_date: '2026-01-01', status: 'pending' };
+from app.check_coaching_select import (
+    MilestoneForCoaching,
+    build_coaching_prompt,
+    select_overdue_milestones,
+)
 
-Deno.test('selects milestones past due_date that are not done', () => {
-  const result = selectOverdueMilestones([base, { ...base, id: 'm2', status: 'done' }], new Date('2026-02-01'));
-  assertEquals(result, [base]);
-});
+BASE = MilestoneForCoaching(
+    id="m1", roadmap_id="r1", user_id="u1", title="5km 완주", due_date="2026-01-01", status="pending"
+)
 
-Deno.test('excludes milestones whose due_date is still in the future', () => {
-  const future = { ...base, due_date: '2027-01-01' };
-  const result = selectOverdueMilestones([future], new Date('2026-02-01'));
-  assertEquals(result, []);
-});
 
-Deno.test('buildCoachingPrompt includes the milestone title', () => {
-  const prompt = buildCoachingPrompt(base);
-  assertEquals(prompt.includes('5km 완주'), true);
-});
+def test_selects_milestones_past_due_date_that_are_not_done():
+    done = replace(BASE, id="m2", status="done")
+    result = select_overdue_milestones([BASE, done], datetime(2026, 2, 1))
+    assert result == [BASE]
+
+
+def test_excludes_milestones_whose_due_date_is_still_in_the_future():
+    future = replace(BASE, due_date="2027-01-01")
+    result = select_overdue_milestones([future], datetime(2026, 2, 1))
+    assert result == []
+
+
+def test_build_coaching_prompt_includes_the_milestone_title():
+    prompt = build_coaching_prompt(BASE)
+    assert "5km 완주" in prompt
 ```
 
 - [ ] **Step 2: 테스트 실행 → 실패 확인**
 
-Run: `deno test supabase/functions/check-coaching/select.test.ts`
-Expected: FAIL — `select.ts` module not found
+Run: `cd backend && . .venv/bin/activate && python -m pytest tests/test_check_coaching.py -v`
+Expected: FAIL with "ModuleNotFoundError: No module named 'app.check_coaching_select'"
 
-- [ ] **Step 3: 구현한다**
+- [ ] **Step 3: 순수 함수를 구현한다** (Deno 버전의 `select.ts`에 대응)
 
-```ts
-// supabase/functions/check-coaching/select.ts
-export interface MilestoneForCoaching {
-  id: string;
-  roadmap_id: string;
-  user_id: string;
-  title: string;
-  due_date: string;
-  status: string;
-}
+```python
+# backend/app/check_coaching_select.py
+from __future__ import annotations
 
-export function selectOverdueMilestones(milestones: MilestoneForCoaching[], now: Date): MilestoneForCoaching[] {
-  const nowTime = now.getTime();
-  return milestones.filter((m) => m.status !== 'done' && new Date(m.due_date).getTime() < nowTime);
-}
+from dataclasses import dataclass
+from datetime import datetime
 
-export function buildCoachingPrompt(milestone: MilestoneForCoaching): string {
-  return `사용자가 "${milestone.title}" 마일스톤의 마감일을 놓쳤어. 비난하지 않는 따뜻한 톤으로, 2문장 이내의 격려 메시지를 만들어줘. 메시지 텍스트만 응답해.`;
-}
+
+@dataclass
+class MilestoneForCoaching:
+    id: str
+    roadmap_id: str
+    user_id: str
+    title: str
+    due_date: str
+    status: str
+
+
+def select_overdue_milestones(
+    milestones: list[MilestoneForCoaching], now: datetime
+) -> list[MilestoneForCoaching]:
+    return [m for m in milestones if m.status != "done" and datetime.fromisoformat(m.due_date) < now]
+
+
+def build_coaching_prompt(milestone: MilestoneForCoaching) -> str:
+    return (
+        f'사용자가 "{milestone.title}" 마일스톤의 마감일을 놓쳤어. 비난하지 않는 '
+        "따뜻한 톤으로, 2문장 이내의 격려 메시지를 만들어줘. 메시지 텍스트만 응답해."
+    )
 ```
 
 - [ ] **Step 4: 테스트 실행 → 통과 확인**
 
-Run: `deno test supabase/functions/check-coaching/select.test.ts`
+Run: `cd backend && . .venv/bin/activate && python -m pytest tests/test_check_coaching.py -v`
 Expected: PASS (3 tests)
 
-- [ ] **Step 5: 엣지 함수 핸들러를 작성한다** (Web Push 발송에는 `web-push` npm
-패키지를 Deno의 `npm:` 스펙시파이어로 가져온다)
+- [ ] **Step 5: 실제 작업 함수를 작성한다** (Deno 버전의 `index.ts`에 대응. Web Push
+발송에는 `pywebpush`를 쓴다)
 
-```ts
-// supabase/functions/check-coaching/index.ts
-import { serve } from 'https://deno.land/std@0.208.0/http/server.ts';
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import webpush from 'npm:web-push@3.6.7';
-import { selectOverdueMilestones, buildCoachingPrompt } from './select.ts';
+```python
+# backend/app/check_coaching.py
+from __future__ import annotations
 
-const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY')!;
-const GEMINI_MODEL = 'gemini-2.5-flash';
-const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
-const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-const VAPID_PUBLIC_KEY = Deno.env.get('VAPID_PUBLIC_KEY')!;
-const VAPID_PRIVATE_KEY = Deno.env.get('VAPID_PRIVATE_KEY')!;
-const VAPID_SUBJECT = Deno.env.get('VAPID_SUBJECT')!;
+import json
+import os
+from datetime import date, datetime
 
-webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+import httpx
+from pywebpush import WebPushException, webpush
+from supabase import create_client
 
-serve(async () => {
-  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+from .check_coaching_select import (
+    MilestoneForCoaching,
+    build_coaching_prompt,
+    select_overdue_milestones,
+)
 
-  const { data: milestones, error } = await supabase
-    .from('milestones')
-    .select('id, roadmap_id, title, due_date, status, roadmaps!inner(user_id)')
-    .neq('status', 'done');
-  if (error) {
-    return new Response(JSON.stringify({ error: error.message }), { status: 500 });
-  }
+GEMINI_MODEL = "gemini-2.5-flash"
 
-  const normalized = (milestones ?? []).map((m: any) => ({
-    id: m.id,
-    roadmap_id: m.roadmap_id,
-    user_id: m.roadmaps.user_id,
-    title: m.title,
-    due_date: m.due_date,
-    status: m.status,
-  }));
 
-  const overdue = selectOverdueMilestones(normalized, new Date());
+async def run_check_coaching() -> int:
+    gemini_api_key = os.environ["GEMINI_API_KEY"]
+    supabase_url = os.environ["SUPABASE_URL"]
+    supabase_service_role_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+    vapid_private_key = os.environ["VAPID_PRIVATE_KEY"]
+    vapid_subject = os.environ["VAPID_SUBJECT"]
 
-  for (const milestone of overdue) {
-    const { data: existing } = await supabase
-      .from('coaching_messages')
-      .select('id')
-      .eq('roadmap_id', milestone.roadmap_id)
-      .eq('trigger_type', 'delay')
-      .gte('created_at', new Date().toISOString().slice(0, 10));
-    if (existing && existing.length > 0) continue;
+    supabase = create_client(supabase_url, supabase_service_role_key)
 
-    const aiResponse = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: buildCoachingPrompt(milestone) }] }],
-          generationConfig: { maxOutputTokens: 256 },
-        }),
-      }
-    );
-    if (!aiResponse.ok) continue;
-    const aiJson = await aiResponse.json();
-    const message = aiJson.candidates?.[0]?.content?.parts?.[0]?.text ?? '마일스톤 마감일이 지났어요. 다시 시작해볼까요?';
+    rows = (
+        supabase.table("milestones")
+        .select("id, roadmap_id, title, due_date, status, roadmaps!inner(user_id)")
+        .neq("status", "done")
+        .execute()
+    ).data
 
-    await supabase.from('coaching_messages').insert({
-      user_id: milestone.user_id,
-      roadmap_id: milestone.roadmap_id,
-      trigger_type: 'delay',
-      message,
-    });
+    normalized = [
+        MilestoneForCoaching(
+            id=row["id"],
+            roadmap_id=row["roadmap_id"],
+            user_id=row["roadmaps"]["user_id"],
+            title=row["title"],
+            due_date=row["due_date"],
+            status=row["status"],
+        )
+        for row in rows
+    ]
 
-    const { data: settings } = await supabase
-      .from('notification_settings')
-      .select('reminder_enabled, push_subscription')
-      .eq('user_id', milestone.user_id)
-      .single();
-    if (settings?.reminder_enabled && settings.push_subscription) {
-      try {
-        await webpush.sendNotification(
-          settings.push_subscription,
-          JSON.stringify({ title: '로드맵 코칭', body: message })
-        );
-      } catch (_err) {
-        // 구독이 만료됐을 수 있음 - MVP 범위에서는 무시하고 다음 실행에서 재시도
-      }
-    }
-  }
+    overdue = select_overdue_milestones(normalized, datetime.now())
 
-  return new Response(JSON.stringify({ processed: overdue.length }), { status: 200 });
-});
+    async with httpx.AsyncClient() as client:
+        for milestone in overdue:
+            existing = (
+                supabase.table("coaching_messages")
+                .select("id")
+                .eq("roadmap_id", milestone.roadmap_id)
+                .eq("trigger_type", "delay")
+                .gte("created_at", date.today().isoformat())
+                .execute()
+            ).data
+            if existing:
+                continue
+
+            ai_response = await client.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent",
+                params={"key": gemini_api_key},
+                json={
+                    "contents": [{"parts": [{"text": build_coaching_prompt(milestone)}]}],
+                    "generationConfig": {"maxOutputTokens": 256},
+                },
+            )
+            if ai_response.status_code != 200:
+                continue
+            ai_json = ai_response.json()
+            message = (
+                ai_json.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text")
+                or "마일스톤 마감일이 지났어요. 다시 시작해볼까요?"
+            )
+
+            supabase.table("coaching_messages").insert(
+                {
+                    "user_id": milestone.user_id,
+                    "roadmap_id": milestone.roadmap_id,
+                    "trigger_type": "delay",
+                    "message": message,
+                }
+            ).execute()
+
+            settings_rows = (
+                supabase.table("notification_settings")
+                .select("reminder_enabled, push_subscription")
+                .eq("user_id", milestone.user_id)
+                .execute()
+            ).data
+            settings = settings_rows[0] if settings_rows else None
+            if settings and settings.get("reminder_enabled") and settings.get("push_subscription"):
+                try:
+                    webpush(
+                        subscription_info=settings["push_subscription"],
+                        data=json.dumps({"title": "로드맵 코칭", "body": message}),
+                        vapid_private_key=vapid_private_key,
+                        vapid_claims={"sub": vapid_subject},
+                    )
+                except WebPushException:
+                    # 구독이 만료됐을 수 있음 - MVP 범위에서는 무시하고 다음 실행에서 재시도
+                    pass
+
+    return len(overdue)
 ```
 
-- [ ] **Step 6: 배포하고 매일 실행되도록 스케줄을 등록한다**
+- [ ] **Step 6: `main.py`에 스케줄 등록과 수동 트리거 엔드포인트를 추가한다**
+(Supabase의 `functions schedule --cron` 대신, 백엔드 프로세스 안에서 APScheduler로
+직접 스케줄링한다)
 
-```bash
-supabase functions deploy check-coaching
-supabase functions schedule check-coaching --cron "0 9 * * *"
+```python
+# backend/app/main.py — 전체를 아래로 교체
+import os
+from contextlib import asynccontextmanager
+
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from .check_coaching import run_check_coaching
+from .generate_roadmap import router as generate_roadmap_router
+
+scheduler = AsyncIOScheduler()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    scheduler.add_job(run_check_coaching, CronTrigger(hour=9, minute=0), id="check-coaching")
+    scheduler.start()
+    yield
+    scheduler.shutdown()
+
+
+app = FastAPI(title="goal-roadmap-app backend", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[os.environ.get("FRONTEND_ORIGIN", "http://localhost:3000")],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(generate_roadmap_router)
+
+
+@app.get("/health")
+def health() -> dict[str, str]:
+    return {"status": "ok"}
+
+
+@app.post("/internal/check-coaching")
+async def trigger_check_coaching() -> dict[str, int]:
+    processed = await run_check_coaching()
+    return {"processed": processed}
 ```
 
-수동 확인: 마감일을 과거로 설정한 마일스톤을 만든 뒤 `supabase functions invoke check-coaching`을
-직접 호출해 `coaching_messages`에 행이 생기고, 구독된 브라우저에 Web Push 알림이 오는지 확인
+`/internal/check-coaching`은 Supabase CLI의 `supabase functions invoke check-coaching`를
+대신하는 수동 실행용 엔드포인트다 — 스케줄이 돌 때까지 기다리지 않고 바로 테스트할
+수 있다. 프론트엔드는 이 경로를 호출하지 않는다.
 
-- [ ] **Step 7: 커밋**
+- [ ] **Step 7: 수동 확인**
+
+Run: 마감일을 과거로 설정한 마일스톤을 만든 뒤, `cd backend && . .venv/bin/activate &&
+GEMINI_API_KEY=... SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... VAPID_PRIVATE_KEY=...
+VAPID_SUBJECT=... uvicorn app.main:app --reload`로 띄우고
+`curl -X POST http://localhost:8000/internal/check-coaching` 호출 → `coaching_messages`에
+행이 생기고, 구독된 브라우저에 Web Push 알림이 오는지 확인. 하루 지나 다시 호출해도
+같은 지연 건에 중복 메시지가 안 쌓이는지도 확인(`trigger_type`+오늘 날짜로 이미
+있으면 건너뜀)
+
+- [ ] **Step 8: 커밋**
 
 ```bash
-git add supabase/functions/check-coaching
-git commit -m "feat: add scheduled coaching edge function with web push"
+git add backend/
+git commit -m "feat: add scheduled coaching job (FastAPI + APScheduler) with web push"
 ```
 
 ---
 
-### Task 19: Edge Function `send-reminders` — 마감일 임박 알림 + 체크인 유도 알림
+### Task 19: FastAPI 스케줄 작업 `send-reminders` — 마감일 임박 알림 + 체크인 유도 알림
 
 **Files:**
-- Create: `supabase/functions/send-reminders/schedule.ts`
-- Create: `supabase/functions/send-reminders/schedule.test.ts`
-- Create: `supabase/functions/send-reminders/index.ts`
+- Create: `backend/app/send_reminders_schedule.py`
+- Create: `backend/app/send_reminders.py`
+- Create: `backend/tests/test_send_reminders.py`
+- Modify: `backend/app/main.py` (Task 16/18에서 만든 파일 — APScheduler로 이 작업을
+  15분마다 등록하고, 수동 테스트용 트리거 엔드포인트도 하나 둔다)
 
 **Interfaces:**
-- Produces: `isReminderDue(reminderTime: string, now: Date, windowMinutes: number): boolean`,
-  `selectMilestonesDueTomorrow(milestones, now): MilestoneDueSoon[]`
+- Produces: `is_reminder_due(reminder_time, now, window_minutes) -> bool`,
+  `select_milestones_due_tomorrow(milestones, now) -> list[MilestoneDueSoon]`,
+  `run_send_reminders() -> int` (발송한 알림 개수를 반환하는 async 함수)
 
-- [ ] **Step 1: 실패하는 Deno 테스트를 작성한다**
+- [ ] **Step 1: 실패하는 테스트를 작성한다** (Deno 버전의 3개 케이스를 그대로 이식)
 
-```ts
-// supabase/functions/send-reminders/schedule.test.ts
-import { assertEquals } from 'https://deno.land/std@0.208.0/assert/mod.ts';
-import { isReminderDue } from './schedule.ts';
+```python
+# backend/tests/test_send_reminders.py
+from datetime import datetime
 
-Deno.test('is due when now falls inside the reminder window', () => {
-  assertEquals(isReminderDue('09:00', new Date('2026-09-07T09:05:00'), 15), true);
-});
+from app.send_reminders_schedule import is_reminder_due
 
-Deno.test('is not due before the reminder time', () => {
-  assertEquals(isReminderDue('09:00', new Date('2026-09-07T08:59:00'), 15), false);
-});
 
-Deno.test('is not due after the window has passed', () => {
-  assertEquals(isReminderDue('09:00', new Date('2026-09-07T09:20:00'), 15), false);
-});
+def test_is_due_when_now_falls_inside_the_reminder_window():
+    assert is_reminder_due("09:00", datetime(2026, 9, 7, 9, 5), 15) is True
+
+
+def test_is_not_due_before_the_reminder_time():
+    assert is_reminder_due("09:00", datetime(2026, 9, 7, 8, 59), 15) is False
+
+
+def test_is_not_due_after_the_window_has_passed():
+    assert is_reminder_due("09:00", datetime(2026, 9, 7, 9, 20), 15) is False
 ```
 
 - [ ] **Step 2: 테스트 실행 → 실패 확인**
 
-Run: `deno test supabase/functions/send-reminders/schedule.test.ts`
-Expected: FAIL — `schedule.ts` module not found
+Run: `cd backend && . .venv/bin/activate && python -m pytest tests/test_send_reminders.py -v`
+Expected: FAIL with "ModuleNotFoundError: No module named 'app.send_reminders_schedule'"
 
-- [ ] **Step 3: 구현한다**
+- [ ] **Step 3: `is_reminder_due`를 구현한다**
 
-```ts
-// supabase/functions/send-reminders/schedule.ts
-export function isReminderDue(reminderTime: string, now: Date, windowMinutes: number): boolean {
-  const [hours, minutes] = reminderTime.split(':').map(Number);
-  const reminderMinutesOfDay = hours * 60 + minutes;
-  const nowMinutesOfDay = now.getHours() * 60 + now.getMinutes();
-  return nowMinutesOfDay >= reminderMinutesOfDay && nowMinutesOfDay < reminderMinutesOfDay + windowMinutes;
-}
+```python
+# backend/app/send_reminders_schedule.py
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+
+
+def is_reminder_due(reminder_time: str, now: datetime, window_minutes: int) -> bool:
+    hours, minutes = (int(part) for part in reminder_time.split(":"))
+    reminder_minutes_of_day = hours * 60 + minutes
+    now_minutes_of_day = now.hour * 60 + now.minute
+    return reminder_minutes_of_day <= now_minutes_of_day < reminder_minutes_of_day + window_minutes
 ```
 
 - [ ] **Step 4: 테스트 실행 → 통과 확인**
 
-Run: `deno test supabase/functions/send-reminders/schedule.test.ts`
+Run: `cd backend && . .venv/bin/activate && python -m pytest tests/test_send_reminders.py -v`
 Expected: PASS (3 tests)
 
-- [ ] **Step 5: `selectMilestonesDueTomorrow`에 대한 실패하는 테스트를 추가한다**
+- [ ] **Step 5: `select_milestones_due_tomorrow`에 대한 실패하는 테스트를 추가한다**
 (스펙 기능 7번의 "마감일 임박 알림" — 내일 마감인 미완료 마일스톤을 골라낸다)
 
-```ts
-// supabase/functions/send-reminders/schedule.test.ts 에 추가
-import { selectMilestonesDueTomorrow } from './schedule.ts';
+```python
+# backend/tests/test_send_reminders.py 에 추가
+from app.send_reminders_schedule import MilestoneDueSoon, select_milestones_due_tomorrow
 
-Deno.test('selects a milestone whose due_date is exactly tomorrow', () => {
-  const result = selectMilestonesDueTomorrow(
-    [{ id: 'm1', title: '5km 완주', due_date: '2026-09-08', status: 'pending' }],
-    new Date('2026-09-07T09:00:00')
-  );
-  assertEquals(result, [{ id: 'm1', title: '5km 완주', due_date: '2026-09-08', status: 'pending' }]);
-});
 
-Deno.test('excludes a milestone that is already done', () => {
-  const result = selectMilestonesDueTomorrow(
-    [{ id: 'm1', title: '5km 완주', due_date: '2026-09-08', status: 'done' }],
-    new Date('2026-09-07T09:00:00')
-  );
-  assertEquals(result, []);
-});
+def test_selects_a_milestone_whose_due_date_is_exactly_tomorrow():
+    m = MilestoneDueSoon(id="m1", title="5km 완주", due_date="2026-09-08", status="pending")
+    result = select_milestones_due_tomorrow([m], datetime(2026, 9, 7, 9, 0))
+    assert result == [m]
 
-Deno.test('excludes a milestone due further out than tomorrow', () => {
-  const result = selectMilestonesDueTomorrow(
-    [{ id: 'm1', title: '5km 완주', due_date: '2026-09-10', status: 'pending' }],
-    new Date('2026-09-07T09:00:00')
-  );
-  assertEquals(result, []);
-});
+
+def test_excludes_a_milestone_that_is_already_done():
+    m = MilestoneDueSoon(id="m1", title="5km 완주", due_date="2026-09-08", status="done")
+    result = select_milestones_due_tomorrow([m], datetime(2026, 9, 7, 9, 0))
+    assert result == []
+
+
+def test_excludes_a_milestone_due_further_out_than_tomorrow():
+    m = MilestoneDueSoon(id="m1", title="5km 완주", due_date="2026-09-10", status="pending")
+    result = select_milestones_due_tomorrow([m], datetime(2026, 9, 7, 9, 0))
+    assert result == []
 ```
 
 - [ ] **Step 6: 테스트 실행 → 실패 확인**
 
-Run: `deno test supabase/functions/send-reminders/schedule.test.ts`
-Expected: FAIL — `selectMilestonesDueTomorrow` is not exported
+Run: `cd backend && . .venv/bin/activate && python -m pytest tests/test_send_reminders.py -v`
+Expected: FAIL — `MilestoneDueSoon`/`select_milestones_due_tomorrow`를 import할 수 없음
 
-- [ ] **Step 7: `selectMilestonesDueTomorrow`를 구현한다**
+- [ ] **Step 7: `select_milestones_due_tomorrow`를 구현한다**
 
-```ts
-// supabase/functions/send-reminders/schedule.ts 에 추가
-export interface MilestoneDueSoon {
-  id: string;
-  title: string;
-  due_date: string;
-  status: string;
-}
+```python
+# backend/app/send_reminders_schedule.py 에 추가
+@dataclass
+class MilestoneDueSoon:
+    id: str
+    title: str
+    due_date: str
+    status: str
 
-export function selectMilestonesDueTomorrow<T extends MilestoneDueSoon>(milestones: T[], now: Date): T[] {
-  const tomorrow = new Date(now);
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  const tomorrowStr = tomorrow.toISOString().slice(0, 10);
-  return milestones.filter((m) => m.status !== 'done' && m.due_date === tomorrowStr);
-}
+
+def select_milestones_due_tomorrow(
+    milestones: list[MilestoneDueSoon], now: datetime
+) -> list[MilestoneDueSoon]:
+    tomorrow = (now.date() + timedelta(days=1)).isoformat()
+    return [m for m in milestones if m.status != "done" and m.due_date == tomorrow]
 ```
 
 - [ ] **Step 8: 테스트 실행 → 통과 확인**
 
-Run: `deno test supabase/functions/send-reminders/schedule.test.ts`
+Run: `cd backend && . .venv/bin/activate && python -m pytest tests/test_send_reminders.py -v`
 Expected: PASS (6 tests total)
 
-- [ ] **Step 9: 엣지 함수 핸들러를 작성한다** (15분마다 실행되어, 리마인더 시간
+- [ ] **Step 9: 실제 작업 함수를 작성한다** (15분마다 실행되어, 리마인더 시간
 창에 들어온 사용자에게 두 알림을 함께 확인해서 보낸다: (a) 내일 마감인 미완료
 마일스톤이 있으면 "마감일 임박", (b) 오늘 아직 체크인하지 않았으면 "체크인 유도")
 
-```ts
-// supabase/functions/send-reminders/index.ts
-import { serve } from 'https://deno.land/std@0.208.0/http/server.ts';
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import webpush from 'npm:web-push@3.6.7';
-import { isReminderDue, selectMilestonesDueTomorrow } from './schedule.ts';
+```python
+# backend/app/send_reminders.py
+from __future__ import annotations
 
-const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
-const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-const VAPID_PUBLIC_KEY = Deno.env.get('VAPID_PUBLIC_KEY')!;
-const VAPID_PRIVATE_KEY = Deno.env.get('VAPID_PRIVATE_KEY')!;
-const VAPID_SUBJECT = Deno.env.get('VAPID_SUBJECT')!;
+import json
+import os
+from datetime import date, datetime
 
-webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+from pywebpush import WebPushException, webpush
+from supabase import create_client
 
-serve(async () => {
-  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-  const now = new Date();
-  const todayStr = now.toISOString().slice(0, 10);
+from .send_reminders_schedule import (
+    MilestoneDueSoon,
+    is_reminder_due,
+    select_milestones_due_tomorrow,
+)
 
-  const { data: settingsRows, error } = await supabase
-    .from('notification_settings')
-    .select('user_id, reminder_time, push_subscription')
-    .eq('reminder_enabled', true);
-  if (error) {
-    return new Response(JSON.stringify({ error: error.message }), { status: 500 });
-  }
 
-  const due = (settingsRows ?? []).filter(
-    (row: any) => isReminderDue(row.reminder_time, now, 15) && row.push_subscription
-  );
+async def run_send_reminders() -> int:
+    supabase_url = os.environ["SUPABASE_URL"]
+    supabase_service_role_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+    vapid_private_key = os.environ["VAPID_PRIVATE_KEY"]
+    vapid_subject = os.environ["VAPID_SUBJECT"]
 
-  let sent = 0;
-  for (const row of due) {
-    // (a) 마감일 임박: 내일 마감인 이 사용자의 미완료 마일스톤이 있으면 알림
-    const { data: userMilestones } = await supabase
-      .from('milestones')
-      .select('id, title, due_date, status, roadmaps!inner(user_id)')
-      .eq('roadmaps.user_id', row.user_id)
-      .neq('status', 'done');
-    const dueSoon = selectMilestonesDueTomorrow(userMilestones ?? [], now);
-    if (dueSoon.length > 0) {
-      try {
-        await webpush.sendNotification(
-          row.push_subscription,
-          JSON.stringify({
-            title: '마감일 임박',
-            body: `"${dueSoon[0].title}" 마감이 내일이에요. 오늘 마무리해볼까요?`,
-          })
-        );
-        sent++;
-      } catch (_err) {
-        // 구독 만료 등 - MVP 범위에서는 무시
-      }
-    }
+    supabase = create_client(supabase_url, supabase_service_role_key)
+    now = datetime.now()
+    today_str = date.today().isoformat()
 
-    // (b) 체크인 유도: 오늘 아직 체크인하지 않았으면 알림
-    const { data: checkin } = await supabase
-      .from('habit_checkins')
-      .select('id')
-      .eq('user_id', row.user_id)
-      .eq('checkin_date', todayStr)
-      .maybeSingle();
-    if (checkin) continue;
-    try {
-      await webpush.sendNotification(
-        row.push_subscription,
-        JSON.stringify({ title: '오늘의 체크인', body: '오늘 목표를 향해 한 걸음 나아가볼까요?' })
-      );
-      sent++;
-    } catch (_err) {
-      // 구독 만료 등 - MVP 범위에서는 무시
-    }
-  }
+    settings_rows = (
+        supabase.table("notification_settings")
+        .select("user_id, reminder_time, push_subscription")
+        .eq("reminder_enabled", True)
+        .execute()
+    ).data
 
-  return new Response(JSON.stringify({ sent }), { status: 200 });
-});
+    due = [
+        row
+        for row in settings_rows
+        if is_reminder_due(row["reminder_time"], now, 15) and row.get("push_subscription")
+    ]
+
+    sent = 0
+    for row in due:
+        # (a) 마감일 임박: 내일 마감인 이 사용자의 미완료 마일스톤이 있으면 알림
+        user_milestones = (
+            supabase.table("milestones")
+            .select("id, title, due_date, status, roadmaps!inner(user_id)")
+            .eq("roadmaps.user_id", row["user_id"])
+            .neq("status", "done")
+            .execute()
+        ).data
+        due_soon = select_milestones_due_tomorrow(
+            [
+                MilestoneDueSoon(id=m["id"], title=m["title"], due_date=m["due_date"], status=m["status"])
+                for m in user_milestones
+            ],
+            now,
+        )
+        if due_soon:
+            try:
+                webpush(
+                    subscription_info=row["push_subscription"],
+                    data=json.dumps(
+                        {
+                            "title": "마감일 임박",
+                            "body": f'"{due_soon[0].title}" 마감이 내일이에요. 오늘 마무리해볼까요?',
+                        }
+                    ),
+                    vapid_private_key=vapid_private_key,
+                    vapid_claims={"sub": vapid_subject},
+                )
+                sent += 1
+            except WebPushException:
+                pass  # 구독 만료 등 - MVP 범위에서는 무시
+
+        # (b) 체크인 유도: 오늘 아직 체크인하지 않았으면 알림
+        checkin_rows = (
+            supabase.table("habit_checkins")
+            .select("id")
+            .eq("user_id", row["user_id"])
+            .eq("checkin_date", today_str)
+            .execute()
+        ).data
+        if checkin_rows:
+            continue
+        try:
+            webpush(
+                subscription_info=row["push_subscription"],
+                data=json.dumps({"title": "오늘의 체크인", "body": "오늘 목표를 향해 한 걸음 나아가볼까요?"}),
+                vapid_private_key=vapid_private_key,
+                vapid_claims={"sub": vapid_subject},
+            )
+            sent += 1
+        except WebPushException:
+            pass  # 구독 만료 등 - MVP 범위에서는 무시
+
+    return sent
 ```
 
-- [ ] **Step 10: 배포하고 15분마다 실행되도록 스케줄을 등록한다**
+- [ ] **Step 10: `main.py`에 스케줄 등록과 수동 트리거 엔드포인트를 추가한다**
 
-```bash
-supabase functions deploy send-reminders
-supabase functions schedule send-reminders --cron "*/15 * * * *"
+```python
+# backend/app/main.py — import에 추가
+from apscheduler.triggers.interval import IntervalTrigger
+
+from .send_reminders import run_send_reminders
 ```
 
-수동 확인: (1) 마감일을 내일로 설정한 미완료 마일스톤을 만든 뒤
-`supabase functions invoke send-reminders`를 직접 호출해 "마감일 임박" 알림이
+```python
+# backend/app/main.py — lifespan() 안, check-coaching 등록 다음 줄에 추가
+    scheduler.add_job(run_send_reminders, IntervalTrigger(minutes=15), id="send-reminders")
+```
+
+```python
+# backend/app/main.py — 맨 아래에 추가
+@app.post("/internal/send-reminders")
+async def trigger_send_reminders() -> dict[str, int]:
+    sent = await run_send_reminders()
+    return {"sent": sent}
+```
+
+`/internal/send-reminders`도 `/internal/check-coaching`과 같은 이유로 둔 수동
+테스트용 엔드포인트다 — 프론트엔드는 호출하지 않는다.
+
+- [ ] **Step 11: 수동 확인**
+
+Run: (1) 마감일을 내일로 설정한 미완료 마일스톤을 만든 뒤 `curl -X POST
+http://localhost:8000/internal/send-reminders`를 호출해 "마감일 임박" 알림이
 오는지, (2) `notification_settings.reminder_time`을 현재 시각 근처로 설정한 뒤
 오늘 체크인하지 않은 계정에만 "오늘의 체크인" 알림이 오고 이미 체크인한 계정은
 건너뛰는지 확인
 
-- [ ] **Step 11: 커밋**
+- [ ] **Step 12: 커밋**
 
 ```bash
-git add supabase/functions/send-reminders
-git commit -m "feat: add scheduled deadline and check-in reminder edge function"
+git add backend/
+git commit -m "feat: add scheduled deadline and check-in reminder job (FastAPI + APScheduler)"
 ```
 
 ---

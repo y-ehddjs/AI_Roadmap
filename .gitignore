@@ -1,3 +1,9 @@
+# Python (backend/)
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
 # Node (frontend, once scaffolded)
 node_modules/
 .next/

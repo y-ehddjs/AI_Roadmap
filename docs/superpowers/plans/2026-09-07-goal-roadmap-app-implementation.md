@@ -4098,7 +4098,7 @@ git commit -m "feat: add profile CRUD and nickname/leaderboard settings"
 **Files:**
 - Modify: `lib/roadmaps.ts` (Task 5에서 만든 파일에 함수를 추가한다)
 - Modify: `lib/milestones.ts` (Task 6에서 만든 파일에 함수를 추가한다)
-- Modify: `app/roadmap/[id]/page.tsx` (Task 9/11에서 만든 파일 — 공개 전환 토글 추가)
+- Modify: `app/roadmap/[id]/page.tsx` (Task 9/11에서 만든 파일 — "게시물 등록" 버튼 추가)
 - Create: `app/r/[id]/page.tsx`
 - Test: `__tests__/roadmaps.test.ts`, `__tests__/milestones.test.ts` (Task 5/6에서
   만든 파일에 케이스를 추가한다)
@@ -4195,7 +4195,10 @@ Run: `npx jest roadmaps.test.ts milestones.test.ts`
 Expected: `roadmaps.test.ts` PASS (12 tests — 10 from before + 2 new),
 `milestones.test.ts` PASS (7 tests — 6 from before + 1 new)
 
-- [ ] **Step 5: 로드맵 상세 페이지에 공개 전환 토글과 복사 가능한 공유 링크를 추가한다**
+- [ ] **Step 5: 로드맵 상세 페이지에 "게시물 등록" 버튼과 복사 가능한 공유 링크를 추가한다**
+(단순 온/오프 체크박스가 아니라 "커뮤니티에 게시물로 등록하기"라는 명시적인 버튼을
+눌러야만 공개로 전환되게 한다 — 우발적으로 토글이 켜지는 걸 막고, "이 로드맵을
+커뮤니티에 올린다"는 행위 자체를 사용자가 분명히 의식하게 하기 위함)
 
 ```tsx
 // app/roadmap/[id]/page.tsx — import에 추가
@@ -4223,23 +4226,34 @@ async function handleCopyLink() {
 
 ```tsx
 {/* 헤더의 삭제 버튼 아래, 진행률 카드 위에 추가 */}
-<div className="rounded-xl border p-3 text-sm">
-  <label className="flex items-center justify-between">
-    <span>공개 링크로 공유</span>
-    <input type="checkbox" checked={roadmap.is_public} onChange={(e) => handleTogglePublic(e.target.checked)} />
-  </label>
-  {roadmap.is_public && (
-    <div className="mt-2 flex items-center gap-2">
-      <input
-        readOnly
-        value={`${typeof window !== 'undefined' ? window.location.origin : ''}/r/${id}`}
-        className="flex-1 rounded-lg border bg-gray-50 p-2 text-xs text-gray-600"
-        onFocus={(e) => e.target.select()}
-      />
-      <button className="rounded-lg border px-3 py-2 text-xs" onClick={handleCopyLink}>
-        {linkCopied ? '복사됨' : '복사'}
-      </button>
-    </div>
+<div className="mt-3 rounded-xl border p-3 text-sm">
+  {roadmap.is_public ? (
+    <>
+      <div className="flex items-center justify-between">
+        <span className="font-medium text-orange-700">커뮤니티에 게시물로 등록됨</span>
+        <button className="text-xs text-red-600 underline" onClick={() => handleTogglePublic(false)}>
+          등록 취소
+        </button>
+      </div>
+      <div className="mt-2 flex items-center gap-2">
+        <input
+          readOnly
+          value={`${typeof window !== 'undefined' ? window.location.origin : ''}/r/${id}`}
+          className="flex-1 rounded-lg border bg-gray-50 p-2 text-xs text-gray-600"
+          onFocus={(e) => e.target.select()}
+        />
+        <button className="rounded-lg border px-3 py-2 text-xs" onClick={handleCopyLink}>
+          {linkCopied ? '복사됨' : '복사'}
+        </button>
+      </div>
+    </>
+  ) : (
+    <button
+      className="w-full rounded-lg bg-orange-500 py-2 font-semibold text-white"
+      onClick={() => handleTogglePublic(true)}
+    >
+      커뮤니티에 게시물로 등록하기
+    </button>
   )}
 </div>
 ```

@@ -87,22 +87,33 @@ export default function RoadmapDetailPage() {
         </button>
       </div>
       <div className="mt-3 rounded-xl border p-3 text-sm">
-        <label className="flex items-center justify-between">
-          <span>공개 링크로 공유</span>
-          <input type="checkbox" checked={roadmap.is_public} onChange={(e) => handleTogglePublic(e.target.checked)} />
-        </label>
-        {roadmap.is_public && (
-          <div className="mt-2 flex items-center gap-2">
-            <input
-              readOnly
-              value={`${typeof window !== 'undefined' ? window.location.origin : ''}/r/${id}`}
-              className="flex-1 rounded-lg border bg-gray-50 p-2 text-xs text-gray-600"
-              onFocus={(e) => e.target.select()}
-            />
-            <button className="rounded-lg border px-3 py-2 text-xs" onClick={handleCopyLink}>
-              {linkCopied ? '복사됨' : '복사'}
-            </button>
-          </div>
+        {roadmap.is_public ? (
+          <>
+            <div className="flex items-center justify-between">
+              <span className="font-medium text-orange-700">커뮤니티에 게시물로 등록됨</span>
+              <button className="text-xs text-red-600 underline" onClick={() => handleTogglePublic(false)}>
+                등록 취소
+              </button>
+            </div>
+            <div className="mt-2 flex items-center gap-2">
+              <input
+                readOnly
+                value={`${typeof window !== 'undefined' ? window.location.origin : ''}/r/${id}`}
+                className="flex-1 rounded-lg border bg-gray-50 p-2 text-xs text-gray-600"
+                onFocus={(e) => e.target.select()}
+              />
+              <button className="rounded-lg border px-3 py-2 text-xs" onClick={handleCopyLink}>
+                {linkCopied ? '복사됨' : '복사'}
+              </button>
+            </div>
+          </>
+        ) : (
+          <button
+            className="w-full rounded-lg bg-orange-500 py-2 font-semibold text-white"
+            onClick={() => handleTogglePublic(true)}
+          >
+            커뮤니티에 게시물로 등록하기
+          </button>
         )}
       </div>
       <p className="text-sm text-gray-600">

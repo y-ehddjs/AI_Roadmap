@@ -107,6 +107,143 @@ supabase/
 
 ---
 
+## API 엔드포인트 명세
+
+이 앱은 커스텀 백엔드 서버가 없다. 화면(스펙 "화면 구성" 1~11번)이 실제로 부르는
+엔드포인트는 두 종류뿐이다: (1) Supabase가 테이블마다 자동으로 열어주는 REST —
+PostgREST, `{SUPABASE_URL}/rest/v1/<테이블명>` — 와 (2) AI 호출처럼 API 키를 서버
+밖으로 못 내보내는 두 지점만 직접 짠 Edge Function, `{SUPABASE_URL}/functions/v1/<함수명>`.
+아래 표는 각 화면이 어떤 엔드포인트를 어떤 요청/응답 모양으로 호출하는지 lib
+함수(위 태스크들에서 이미 구현한) 기준으로 정리한 것이다.
+
+**공통 사항**
+
+- 인증 화면(1번)과 9번(공개 로드맵 보기)의 비로그인 접근을 빼면, 모든 `/rest/v1/*`
+  요청에는 `Authorization: Bearer <사용자 세션 JWT>` + `apikey: <anon key>` 헤더가
+  실려야 한다. 실제 접근 제어는 이 헤더가 아니라 RLS 정책(Task 2/21)이 한다.
+- PostgREST는 REST 관용구와 달리 "없음"에 404를 쓰지 않는다: 조회(GET)는 매칭되는
+  행이 0개여도 200 + 빈 배열이다. 다만 `.single()`을 붙인 조회는 행이 정확히 1개가
+  아니면 406(에러 코드 `PGRST116`)을 낸다 — `.maybeSingle()`은 0개일 때 이 406을
+  삼키고 200 + `data: null`로 대신 돌려준다(9번 화면의 `getPublicRoadmap`이 비공개
+  로드맵에 대해 에러를 던지는 것도 이 406 때문이다).
+- 쓰기(POST/PATCH/DELETE)는 `.select()`를 안 붙이면 기본 `Prefer: return=minimal`이라
+  성공해도 본문 없이 201(생성)/204(수정·삭제)만 온다. `.select().single()`을 붙이면
+  `Prefer: return=representation`으로 바뀌어 201/200과 함께 갱신된 행이 본문에 실린다.
+- RLS 정책을 만족 못 하는 행(내 것이 아닌 로드맵을 수정하려는 시도 등)은 403을
+  내는 게 아니라 애초에 "안 보이는" 셈이라 0 rows affected로 조용히 끝난다(에러
+  없이 204만 오고 실제로는 아무것도 안 바뀜). 이 앱의 모든 쓰기는 `auth.uid()`
+  기준으로 자기 행만 걸도록 짜여 있어 실무에서 이 경로를 탈 일은 없다.
+- 세션 토큰이 없거나 만료되면 401.
+
+### 1. 인증 (화면 1: 온보딩/로그인, `lib/auth.ts` · `lib/useAuth.ts`)
+
+| 메서드 | 경로 | 용도 | 요청 | 응답 | 상태 코드 |
+|---|---|---|---|---|---|
+| POST | `/auth/v1/signup` | 회원가입 (`supabase.auth.signUp`) | `{ email, password }` | `{ user, session }` — 성공 시 `handle_new_user` 트리거가 `notification_settings`/`profiles` 기본 행을 자동 생성 | 200, 422(이미 가입된 이메일), 400(형식 오류) |
+| POST | `/auth/v1/token?grant_type=password` | 로그인 (`signInWithPassword`) | `{ email, password }` | `{ access_token, refresh_token, user }` | 200, 400(이메일/비밀번호 불일치) |
+| POST | `/auth/v1/logout` | 로그아웃 (`signOut`, 설정 화면) | 없음(Authorization 헤더로 세션 식별) | 없음 | 204, 401 |
+| GET | `/auth/v1/user` | 세션 확인 (`getUser` — `useRequireAuth`/`useRedirectIfAuthed`가 마운트 시 호출) | 없음 | `{ user }` (비로그인 시 `user: null`) | 200 |
+
+### 2. 로드맵 (화면 2/3/4/6, `lib/roadmaps.ts`, `roadmaps` 테이블)
+
+| 메서드 | 경로 | 용도 | 요청 | 응답 | 상태 코드 |
+|---|---|---|---|---|---|
+| POST | `/rest/v1/roadmaps` | `createRoadmap` — 로드맵 생성(화면 3, 수동 입력) | `{ user_id, title, description, source: 'ai'\|'manual', status: 'active' }` | `Roadmap` 단일 행 | 201 |
+| GET | `/rest/v1/roadmaps?select=*&user_id=eq.{userId}&order=created_at.desc` | `listRoadmaps` — 홈 리스트(화면 2) | 없음 | `Roadmap[]` | 200 |
+| GET | `/rest/v1/roadmaps?select=*&id=eq.{roadmapId}` | `getRoadmap` — 상세 진입(화면 4) | 없음 | `Roadmap` 단일 행 | 200, 406(없거나 남의 것) |
+| PATCH | `/rest/v1/roadmaps?id=eq.{roadmapId}` | `completeRoadmapIfAllDone` — 마일스톤 전부 완료 시 자동 완료 처리(화면 5) | `{ status: 'completed' }` | 없음 | 204 |
+| PATCH | `/rest/v1/roadmaps?id=eq.{roadmapId}` | `setRoadmapPublic` — 공개/비공개 전환(화면 4) | `{ is_public: boolean }` | 없음 | 204 |
+| DELETE | `/rest/v1/roadmaps?id=eq.{roadmapId}` | `deleteRoadmap` — 로드맵 삭제(화면 4, `on delete cascade`로 마일스톤도 함께 삭제) | 없음 | 없음 | 204 |
+| GET | `/rest/v1/roadmaps?select=id,title&id=eq.{roadmapId}` | `getPublicRoadmap` — 공개 로드맵 보기(화면 9, 비로그인 가능). 개인 정보 컬럼(`description`/`user_id` 등)은 애초에 select하지 않음 | 없음 | `{ id, title }` | 200, 406(비공개거나 없는 id → 화면에서 "찾을 수 없거나 비공개" 문구로 처리) |
+
+### 3. 마일스톤 (화면 4/5/9, `lib/milestones.ts`, `milestones` 테이블)
+
+| 메서드 | 경로 | 용도 | 요청 | 응답 | 상태 코드 |
+|---|---|---|---|---|---|
+| POST | `/rest/v1/milestones` | `createMilestone` — 마일스톤 추가(화면 4) | `{ roadmap_id, title, description, due_date, order_index, status: 'pending' }` | `Milestone` 단일 행 | 201 |
+| GET | `/rest/v1/milestones?select=*&roadmap_id=eq.{roadmapId}&order=due_date.asc&order=order_index.asc` | `listMilestones` — 로드맵 상세 타임라인(화면 4). 정렬은 `due_date` 우선, `order_index`는 동점 처리용 보조키 | 없음 | `Milestone[]` | 200 |
+| GET | `/rest/v1/milestones?select=*&id=eq.{id}` | 마일스톤 상세 진입(화면 5) — 별도 lib 함수 없이 페이지 컴포넌트가 직접 조회 | 없음 | `Milestone` 단일 행 | 200, 406 |
+| PATCH | `/rest/v1/milestones?id=eq.{milestoneId}` | `updateMilestone` — 체크/메모/마감일 수정(화면 5) | `Partial<{ title, description, due_date, status, completed_at }>` | `Milestone` 단일 행 | 200 |
+| DELETE | `/rest/v1/milestones?id=eq.{milestoneId}` | `deleteMilestone` — 마일스톤 삭제(화면 4/5) | 없음 | 없음 | 204 |
+| GET | `/rest/v1/milestones?select=id,title,due_date,order_index,status&roadmap_id=eq.{roadmapId}&order=due_date.asc&order=order_index.asc` | `listPublicMilestones` — 공개 로드맵 보기(화면 9). `description`/`roadmap_id`는 select하지 않음 | 없음 | `Pick<Milestone,'id'\|'title'\|'due_date'\|'order_index'\|'status'>[]` | 200 |
+
+### 4. 체크인 · 스트릭 (화면 2, `lib/checkins.ts` · `lib/streak.ts`, `habit_checkins` 테이블)
+
+| 메서드 | 경로 | 용도 | 요청 | 응답 | 상태 코드 |
+|---|---|---|---|---|---|
+| POST | `/rest/v1/habit_checkins?on_conflict=user_id,checkin_date` (`Prefer: resolution=ignore-duplicates`) | `recordCheckin` 1단계 — 오늘 날짜로 upsert(이미 있으면 무시) | `{ user_id, checkin_date, streak_count: 0 }` | 없음 | 201 |
+| GET | `/rest/v1/habit_checkins?select=checkin_date&user_id=eq.{userId}` | `recordCheckin`/`getTodayStreak` — 전체 체크인 날짜 조회 후 `computeStreak`로 연속일 계산(홈 화면 스트릭 표시) | 없음 | `{ checkin_date }[]` | 200 |
+| PATCH | `/rest/v1/habit_checkins?user_id=eq.{userId}&checkin_date=eq.{today}` | `recordCheckin` 2단계 — 방금 계산한 연속일을 오늘 행에 반영 | `{ streak_count }` | 없음 | 204 |
+
+### 5. 알림 설정 (화면 8, `notification_settings` 테이블)
+
+| 메서드 | 경로 | 용도 | 요청 | 응답 | 상태 코드 |
+|---|---|---|---|---|---|
+| GET | `/rest/v1/notification_settings?select=reminder_enabled,reminder_time&user_id=eq.{userId}` | 설정 페이지 진입 시 현재 값 로드 — 별도 lib 함수 없이 페이지 컴포넌트가 직접 조회(항상 켜진 상태로 시작하지 않기 위함) | 없음 | `{ reminder_enabled, reminder_time }` | 200, 406 |
+| POST | `/rest/v1/notification_settings?on_conflict=user_id` (`Prefer: resolution=merge-duplicates,return=minimal`) | 알림 on/off 토글(`push_subscription` 동봉), 알림 시간 변경, 서비스 워커의 구독 갱신 저장 — 모두 부분 upsert | `{ user_id, reminder_enabled? , reminder_time?, push_subscription? }` (필드는 호출부마다 부분적으로만 채움) | 없음 | 201 |
+
+### 6. 프로필 (화면 8/10/11, `lib/profiles.ts`, `profiles` 테이블)
+
+| 메서드 | 경로 | 용도 | 요청 | 응답 | 상태 코드 |
+|---|---|---|---|---|---|
+| GET | `/rest/v1/profiles?select=*&user_id=eq.{userId}` | `getProfile` — 설정 화면에 닉네임/리더보드 표시 여부 로드 | 없음 | `Profile` 단일 행 | 200, 406 |
+| PATCH | `/rest/v1/profiles?user_id=eq.{userId}` | `updateProfile` — 닉네임 변경, "리더보드에 표시" 토글 | `Partial<{ display_name, show_on_leaderboard }>` | `Profile` 단일 행 | 200 |
+
+### 7. AI 코칭 메시지 (화면 7, `lib/coaching.ts`, `coaching_messages` 테이블)
+
+| 메서드 | 경로 | 용도 | 요청 | 응답 | 상태 코드 |
+|---|---|---|---|---|---|
+| GET | `/rest/v1/coaching_messages?select=*&user_id=eq.{userId}&order=created_at.desc` | `listMessages` — 코칭 메시지함 목록 | 없음 | `CoachingMessage[]` | 200 |
+| PATCH | `/rest/v1/coaching_messages?id=eq.{messageId}` | `markRead` — 메시지 클릭 시 읽음 처리 | `{ read_at: <ISO 시각> }` | 없음 | 204 |
+
+메시지 생성(INSERT)은 클라이언트 화면에서 직접 하지 않는다 — 아래 10번 표의
+`check-coaching` Edge Function이 서버 사이드(service role)로만 써넣는다.
+
+### 8. 하이파이브 리액션 (화면 9, `lib/reactions.ts`, `milestone_reactions` 테이블)
+
+| 메서드 | 경로 | 용도 | 요청 | 응답 | 상태 코드 |
+|---|---|---|---|---|---|
+| GET | `/rest/v1/milestone_reactions?select=id&milestone_id=eq.{milestoneId}&user_id=eq.{userId}` | `hasReacted` — 내가 이미 눌렀는지(`.maybeSingle()`) | 없음 | `{ id } \| null` | 200 |
+| HEAD | `/rest/v1/milestone_reactions?select=id&milestone_id=eq.{milestoneId}` (`Prefer: count=exact`) | `getReactionCount` — 마일스톤별 하이파이브 개수(본문 없이 `Content-Range` 헤더로만 개수 전달) | 없음 | 없음(개수는 `Content-Range` 헤더) | 200 |
+| POST | `/rest/v1/milestone_reactions` | `toggleReaction` — 안 눌렀던 상태에서 누름 | `{ milestone_id, user_id }` | 없음 | 201, 409(동시 클릭으로 유니크 제약 충돌 시) |
+| DELETE | `/rest/v1/milestone_reactions?milestone_id=eq.{milestoneId}&user_id=eq.{userId}` | `toggleReaction` — 이미 눌렀던 상태에서 취소 | 없음 | 없음 | 204 |
+
+### 9. 리더보드 조회 (화면 10, `lib/leaderboard.ts` — `profiles`/`habit_checkins` 복합 조회)
+
+`roadmaps`와 마찬가지로 `profiles`도 `auth.users`만 참조할 뿐 서로 직접 FK로 묶여
+있지 않아 PostgREST가 자동으로 조인해주지 못한다 — 두 번 나눠 조회한 뒤
+`user_id`를 키 삼아 클라이언트에서 직접 합친다.
+
+| 메서드 | 경로 | 용도 | 요청 | 응답 | 상태 코드 |
+|---|---|---|---|---|---|
+| GET | `/rest/v1/profiles?select=user_id,display_name&show_on_leaderboard=eq.true` | `getLeaderboard` 1단계 — 표시하기로 한 사용자 목록 | 없음 | `{ user_id, display_name }[]` | 200 |
+| GET | `/rest/v1/habit_checkins?select=checkin_date&user_id=eq.{userId}` | `getLeaderboard` 2단계 — 위 각 사용자마다 반복 호출해 `computeStreak`로 연속일 계산 | 없음 | `{ checkin_date }[]` | 200 |
+
+### 10. 커뮤니티 조회 (화면 11, `lib/community.ts` — `roadmaps`/`profiles`/`milestones`/`milestone_reactions` 복합 조회)
+
+| 메서드 | 경로 | 용도 | 요청 | 응답 | 상태 코드 |
+|---|---|---|---|---|---|
+| GET | `/rest/v1/profiles?select=user_id&display_name=ilike.*{검색어}*` | `listCommunityRoadmaps` — 닉네임 검색 시에만 먼저 호출, 매칭되는 사람이 없으면 바로 빈 배열 반환(뒤 단계 호출 안 함) | 없음 | `{ user_id }[]` | 200 |
+| GET | `/rest/v1/roadmaps?select=id,title,user_id&is_public=eq.true` (검색어가 있으면 `&user_id=in.({위에서 찾은 user_id 목록})` 추가) | `listCommunityRoadmaps` — 공개 로드맵 목록 | 없음 | `{ id, title, user_id }[]` | 200 |
+| GET | `/rest/v1/profiles?select=user_id,display_name&user_id=in.({로드맵 소유자 id 목록})` | `listCommunityRoadmaps` — 목록에 표시할 소유자 닉네임 조회 | 없음 | `{ user_id, display_name }[]` | 200 |
+| GET | `/rest/v1/milestones?select=id&roadmap_id=eq.{roadmapId}` | `countHighFivesForRoadmap` 1단계 — 로드맵당 마일스톤 id 목록(없으면 하이파이브 조회 없이 바로 0) | 없음 | `{ id }[]` | 200 |
+| HEAD | `/rest/v1/milestone_reactions?select=id&milestone_id=in.({위 마일스톤 id 목록})` (`Prefer: count=exact`; "오늘 하이파이브순" 정렬이면 `&created_at=gte.{오늘 자정 ISO}` 추가) | `countHighFivesForRoadmap` 2단계 — 정렬 기준(오늘/누적)에 따른 하이파이브 개수 | 없음 | 없음(개수는 `Content-Range` 헤더) | 200 |
+
+### 11. Edge Functions (AI/알림 전용 커스텀 엔드포인트)
+
+| 메서드 | 경로 | 화면/트리거 | 요청 | 응답 | 상태 코드 |
+|---|---|---|---|---|---|
+| POST | `/functions/v1/generate-roadmap` | 화면 3 — AI 로드맵 생성 플로우 | `{ user_id, title, description? }` | `{ roadmap_id }` | 200, 502(Gemini 호출 실패 또는 응답 파싱 실패), 500(DB insert 실패 — 마일스톤 insert 실패 시 방금 만든 로드맵도 롤백 삭제한 뒤 응답) |
+| POST | `/functions/v1/check-coaching` | 서버 스케줄(매일, 화면 7 메시지의 생성원) — Gemini로 격려 메시지를 만들어 `coaching_messages`에 쓰고 Web Push 발송 | 없음(cron이 인자 없이 호출) | `{ processed: <처리한 지연 마일스톤 수> }` | 200, 500(마일스톤 조회 실패) |
+| POST | `/functions/v1/send-reminders` | 서버 스케줄(15분마다) — 마감일 임박/체크인 유도 Web Push 발송 | 없음(cron이 인자 없이 호출) | `{ sent: <발송한 알림 수> }` | 200, 500(설정 조회 실패) |
+
+두 스케줄 함수는 화면이 직접 호출하는 게 아니라 `supabase functions schedule`로
+등록된 cron이 서버 사이드에서만 호출하며, 응답을 보는 사람도 없다 — 표에 넣은
+이유는 이 함수들이 화면 7의 코칭 메시지와 Web Push 알림의 실제 생성원이기
+때문이다.
+
+---
+
 ### Task 1: Next.js 프로젝트 셋업 + Tailwind + Supabase 클라이언트 설정
 
 **Files:**

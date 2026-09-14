@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { supabase } from '../../../lib/supabase';
 import { useRequireAuth } from '../../../lib/useAuth';
-import { getRoadmap, deleteRoadmap } from '../../../lib/roadmaps';
+import { getRoadmap, deleteRoadmap, setRoadmapPublic } from '../../../lib/roadmaps';
 import { listMilestones, createMilestone } from '../../../lib/milestones';
 import { calculateProgress, milestoneStatus } from '../../../lib/progress';
 import { computeNodePositions } from '../../../lib/timeline';
@@ -57,6 +57,21 @@ export default function RoadmapDetailPage() {
     router.replace('/');
   }
 
+  const [linkCopied, setLinkCopied] = useState(false);
+
+  async function handleTogglePublic(checked: boolean) {
+    if (!id) return;
+    await setRoadmapPublic(supabase, id, checked);
+    await load();
+  }
+
+  async function handleCopyLink() {
+    if (!id) return;
+    await navigator.clipboard.writeText(`${window.location.origin}/r/${id}`);
+    setLinkCopied(true);
+    setTimeout(() => setLinkCopied(false), 2000);
+  }
+
   if (!roadmap) return null;
   const progress = calculateProgress(milestones);
   const now = new Date();
@@ -70,6 +85,25 @@ export default function RoadmapDetailPage() {
         <button className="text-sm text-red-600 underline" onClick={handleDeleteRoadmap}>
           로드맵 삭제
         </button>
+      </div>
+      <div className="mt-3 rounded-xl border p-3 text-sm">
+        <label className="flex items-center justify-between">
+          <span>공개 링크로 공유</span>
+          <input type="checkbox" checked={roadmap.is_public} onChange={(e) => handleTogglePublic(e.target.checked)} />
+        </label>
+        {roadmap.is_public && (
+          <div className="mt-2 flex items-center gap-2">
+            <input
+              readOnly
+              value={`${typeof window !== 'undefined' ? window.location.origin : ''}/r/${id}`}
+              className="flex-1 rounded-lg border bg-gray-50 p-2 text-xs text-gray-600"
+              onFocus={(e) => e.target.select()}
+            />
+            <button className="rounded-lg border px-3 py-2 text-xs" onClick={handleCopyLink}>
+              {linkCopied ? '복사됨' : '복사'}
+            </button>
+          </div>
+        )}
       </div>
       <p className="text-sm text-gray-600">
         전체 진행률 {progress.percent}% ({progress.completedCount}/{progress.totalCount})

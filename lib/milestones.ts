@@ -51,3 +51,18 @@ export async function deleteMilestone(client: SupabaseClient, milestoneId: strin
   const { error } = await client.from('milestones').delete().eq('id', milestoneId);
   if (error) throw error;
 }
+
+// 공개 화면 전용 — description(개인 메모)과 roadmap_id는 select하지 않는다.
+export async function listPublicMilestones(
+  client: SupabaseClient,
+  roadmapId: string
+): Promise<Pick<Milestone, 'id' | 'title' | 'due_date' | 'order_index' | 'status'>[]> {
+  const { data, error } = await client
+    .from('milestones')
+    .select('id, title, due_date, order_index, status')
+    .eq('roadmap_id', roadmapId)
+    .order('due_date', { ascending: true })
+    .order('order_index', { ascending: true });
+  if (error) throw error;
+  return (data ?? []) as Pick<Milestone, 'id' | 'title' | 'due_date' | 'order_index' | 'status'>[];
+}

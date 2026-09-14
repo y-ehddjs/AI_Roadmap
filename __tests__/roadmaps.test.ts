@@ -1,4 +1,4 @@
-import { createRoadmap, listRoadmaps, getRoadmap, deleteRoadmap, completeRoadmapIfAllDone } from '../lib/roadmaps';
+import { createRoadmap, listRoadmaps, getRoadmap, deleteRoadmap, completeRoadmapIfAllDone, setRoadmapPublic, getPublicRoadmap } from '../lib/roadmaps';
 import { makeFakeClient } from '../test-utils/fakeSupabaseClient';
 
 test('createRoadmap inserts and returns the created row', async () => {
@@ -66,4 +66,17 @@ test('completeRoadmapIfAllDone does nothing for a roadmap with no milestones', a
   const client = makeFakeClient([{ data: [], error: null }]);
   await completeRoadmapIfAllDone(client, 'r1');
   expect(client.from).toHaveBeenCalledTimes(1);
+});
+
+test('setRoadmapPublic updates the is_public flag', async () => {
+  const client = makeFakeClient([{ data: null, error: null }]);
+  await setRoadmapPublic(client, 'r1', true);
+  expect(client.from).toHaveBeenCalledWith('roadmaps');
+});
+
+test('getPublicRoadmap only returns id and title', async () => {
+  const row = { id: 'r1', title: 'Test' };
+  const client = makeFakeClient([{ data: row, error: null }]);
+  const result = await getPublicRoadmap(client, 'r1');
+  expect(result).toEqual(row);
 });

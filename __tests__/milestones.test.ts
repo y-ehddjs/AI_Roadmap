@@ -1,4 +1,4 @@
-import { createMilestone, listMilestones, updateMilestone, deleteMilestone } from '../lib/milestones';
+import { createMilestone, listMilestones, updateMilestone, deleteMilestone, listPublicMilestones } from '../lib/milestones';
 import { makeFakeClient } from '../test-utils/fakeSupabaseClient';
 
 test('createMilestone inserts and returns the created row', async () => {
@@ -36,4 +36,11 @@ test('deleteMilestone deletes by id', async () => {
 test('deleteMilestone throws when supabase returns an error', async () => {
   const client = makeFakeClient([{ data: null, error: new Error('delete failed') }]);
   await expect(deleteMilestone(client, 'm1')).rejects.toThrow('delete failed');
+});
+
+test('listPublicMilestones returns only the public-safe columns', async () => {
+  const rows = [{ id: 'm1', title: '1km 완주', due_date: '2026-10-01', order_index: 0, status: 'pending' }];
+  const client = makeFakeClient([{ data: rows, error: null }]);
+  const result = await listPublicMilestones(client, 'r1');
+  expect(result).toEqual(rows);
 });

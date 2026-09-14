@@ -1,0 +1,95 @@
+{
+  "artboards": [
+    {
+      "file": "Main.dc.html",
+      "title": "홈 (로드맵 목록)",
+      "x": 0,
+      "y": 0,
+      "w": 390,
+      "h": 844
+    },
+    {
+      "file": "Create.dc.html",
+      "title": "로드맵 생성",
+      "x": 470,
+      "y": 0,
+      "w": 390,
+      "h": 844
+    },
+    {
+      "file": "Detail.dc.html",
+      "title": "로드맵 상세 (타임라인)",
+      "x": 940,
+      "y": 0,
+      "w": 390,
+      "h": 844
+    },
+    {
+      "file": "DirectionA.dc.html",
+      "title": "A. 레트로 게임 맵",
+      "x": 0,
+      "y": 0,
+      "w": 320,
+      "h": 640,
+      "page": "directions"
+    },
+    {
+      "file": "DirectionB.dc.html",
+      "title": "B. 다크 네온 퀘스트로그",
+      "x": 400,
+      "y": 0,
+      "w": 320,
+      "h": 640,
+      "page": "directions"
+    },
+    {
+      "file": "DirectionC.dc.html",
+      "title": "C. 에디토리얼 미니멀",
+      "x": 800,
+      "y": 0,
+      "w": 320,
+      "h": 640,
+      "page": "directions"
+    },
+    {
+      "file": "DirectionD.dc.html",
+      "title": "D. A+B 믹스 (신스웨이브 아케이드)",
+      "x": 1200,
+      "y": 0,
+      "w": 320,
+      "h": 640,
+      "page": "directions"
+    }
+  ],
+  "annotations": [
+    {
+      "id": "flow-note",
+      "x": 0,
+      "y": -70,
+      "w": 700,
+      "text": "홈에서 + 버튼 → 로드맵 생성 → 로드맵 상세(타임라인)로 이어지는 핵심 플로우"
+    },
+    {
+      "id": "direction-note",
+      "x": 0,
+      "y": -70,
+      "w": 1200,
+      "text": "마음에 드는 스타일 방향을 골라주세요. 고르면 그 스타일로 3개 화면을 다시 만들게요.",
+      "page": "directions"
+    }
+  ],
+  "launch": {
+    "view": "canvas",
+    "page": "directions"
+  },
+  "pages": [
+    {
+      "id": "current",
+      "name": "현재 목업"
+    },
+    {
+      "id": "directions",
+      "name": "스타일 방향 비교"
+    }
+  ]
+}

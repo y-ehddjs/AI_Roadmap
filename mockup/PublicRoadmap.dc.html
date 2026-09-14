@@ -1,0 +1,100 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-top: #170b2e;
+      --bg-bottom: #2b0f3d;
+      --panel: #1c0f33;
+      --border: #0a0414;
+      --text: #f2e9ff;
+      --text-dim: #9a86c2;
+      --neon-pink: #ff2e8f;
+      --neon-cyan: #2ee6ff;
+      --neon-yellow: #ffe93f;
+      --neon-purple: #b98bff;
+    }
+    body { margin: 0; font-family: "Space Mono", monospace; color: var(--text); }
+    h1, .display { font-family: "Press Start 2P", "Space Mono", monospace; }
+  </style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; display: flex; flex-direction: column; position: relative; overflow: hidden; background: linear-gradient(180deg, var(--bg-top) 0%, var(--bg-bottom) 55%, #120821 100%);">
+
+  <div style="position: relative; padding: 20px 24px 0; display: flex; flex-direction: column; align-items: center; gap: 8px;">
+    <span style="font-size: 8px; font-weight: 700; letter-spacing: 1px; color: var(--neon-purple); border: 2px solid var(--neon-purple); border-radius: 999px; padding: 3px 10px;">공개 로드맵 · 읽기 전용</span>
+    <h1 style="font-size: 13px; text-align: center; line-height: 1.6;">10KM 마라톤 완주하기</h1>
+  </div>
+
+  <div style="position: relative; padding: 12px 24px 4px;">
+    <div style="background: var(--panel); border: 3px solid var(--border); border-radius: 12px; padding: 12px 16px; box-shadow: 4px 4px 0 var(--border), 0 0 18px rgba(46,230,255,0.12); display: flex; flex-direction: column; gap: 8px;">
+      <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--text-dim);">
+        <span>전체 진행률</span>
+        <span style="font-weight: 700; color: var(--neon-cyan);">42%</span>
+      </div>
+      <div style="height: 10px; background: #0e0a1c; border: 2px solid var(--border); border-radius: 999px; overflow: hidden;">
+        <div style="width: 42%; height: 100%; background: var(--neon-cyan); box-shadow: 0 0 8px var(--neon-cyan);"></div>
+      </div>
+    </div>
+  </div>
+
+  <div style="position: relative; flex: 1; padding: 20px 24px 40px; overflow-y: auto;">
+    <svg width="342" height="620" viewBox="0 0 342 620" style="position: absolute; left: 24px; top: 20px; z-index: 0;">
+      <path d="M60,40 C60,115 280,115 280,190 C280,265 60,265 60,340 C60,415 280,415 280,490"
+        fill="none" style="stroke: var(--neon-pink); opacity: 0.4;" stroke-width="3" stroke-linecap="round" stroke-dasharray="2 12"/>
+    </svg>
+
+    <div style="position: absolute; left: 60px; top: 40px; transform: translate(-50%, -50%); z-index: 1; width: 52px; height: 52px; border-radius: 10px; background: var(--panel); border: 3px solid var(--neon-cyan); box-shadow: 3px 3px 0 var(--border), 0 0 14px rgba(46,230,255,0.6); display: flex; align-items: center; justify-content: center;">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--neon-cyan)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l4 4L19 6"/></svg>
+    </div>
+    <div style="position: absolute; left: 100px; top: 40px; transform: translateY(-50%); width: 170px; display: flex; flex-direction: column; gap: 4px; align-items: flex-start;">
+      <div style="font-size: 11px; font-weight: 700;">1km 완주</div>
+      <div style="font-size: 9px; color: var(--text-dim);">완료 · 2/10</div>
+      <button style="display: flex; align-items: center; gap: 4px; background: var(--neon-pink); color: var(--border); border: 2px solid var(--border); border-radius: 999px; padding: 3px 8px; font-size: 9px; font-weight: 700; box-shadow: 2px 2px 0 var(--border);">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3z"/><path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg>
+        4
+      </button>
+    </div>
+
+    <div style="position: absolute; left: 280px; top: 190px; transform: translate(-50%, -50%); z-index: 1; width: 52px; height: 52px; border-radius: 10px; background: var(--panel); border: 3px solid var(--neon-cyan); box-shadow: 3px 3px 0 var(--border), 0 0 14px rgba(46,230,255,0.6); display: flex; align-items: center; justify-content: center;">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--neon-cyan)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l4 4L19 6"/></svg>
+    </div>
+    <div style="position: absolute; left: 40px; top: 190px; transform: translateY(-50%); width: 170px; display: flex; flex-direction: column; gap: 4px; align-items: flex-end; text-align: right;">
+      <div style="font-size: 11px; font-weight: 700;">3km 완주</div>
+      <div style="font-size: 9px; color: var(--text-dim);">완료 · 2/24</div>
+      <button style="display: flex; align-items: center; gap: 4px; background: var(--panel); color: var(--text); border: 2px solid var(--border); border-radius: 999px; padding: 3px 8px; font-size: 9px; font-weight: 700;">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3z"/><path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg>
+        1
+      </button>
+    </div>
+
+    <div style="position: absolute; left: 60px; top: 340px; transform: translate(-50%, -50%); z-index: 1; width: 62px; height: 62px; border-radius: 10px; background: var(--neon-pink); border: 3px solid var(--border); box-shadow: 4px 4px 0 var(--border), 0 0 20px rgba(255,46,143,0.7); display: flex; align-items: center; justify-content: center;">
+      <span class="display" style="font-size: 15px; color: var(--border);">03</span>
+    </div>
+    <div style="position: absolute; left: 104px; top: 340px; transform: translateY(-50%); width: 170px; display: flex; flex-direction: column; gap: 4px; align-items: flex-start;">
+      <div style="font-size: 12px; font-weight: 700; color: var(--neon-pink);">5km 완주</div>
+      <div style="font-size: 9px; color: var(--neon-yellow);">마감 3/15 · D-3</div>
+      <button style="display: flex; align-items: center; gap: 4px; background: var(--panel); color: var(--text); border: 2px solid var(--border); border-radius: 999px; padding: 3px 8px; font-size: 9px; font-weight: 700;">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3z"/><path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg>
+        0
+      </button>
+    </div>
+
+    <div style="position: absolute; left: 280px; top: 490px; transform: translate(-50%, -50%); z-index: 1; width: 52px; height: 52px; border-radius: 10px; background: var(--panel); border: 3px solid var(--text-dim); display: flex; align-items: center; justify-content: center;">
+      <span class="display" style="font-size: 13px; color: var(--text-dim);">04</span>
+    </div>
+    <div style="position: absolute; left: 40px; top: 490px; transform: translateY(-50%); width: 170px; display: flex; flex-direction: column; gap: 4px; align-items: flex-end; text-align: right;">
+      <div style="font-size: 11px; font-weight: 700; color: var(--text-dim);">7km 완주</div>
+      <div style="font-size: 9px; color: var(--text-dim);">마감 3/29</div>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

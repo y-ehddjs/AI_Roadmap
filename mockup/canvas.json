@@ -1,0 +1,22 @@
+{
+  "artboards": [
+    { "file": "Login.dc.html", "title": "로그인", "x": 0, "y": 0, "w": 390, "h": 844 },
+    { "file": "Main.dc.html", "title": "홈 (로드맵 목록)", "x": 470, "y": 0, "w": 390, "h": 844 },
+    { "file": "Create.dc.html", "title": "로드맵 생성", "x": 940, "y": 0, "w": 390, "h": 844 },
+    { "file": "Detail.dc.html", "title": "로드맵 상세 (타임라인)", "x": 1410, "y": 0, "w": 390, "h": 844 },
+    { "file": "Milestone.dc.html", "title": "마일스톤 상세", "x": 1880, "y": 0, "w": 390, "h": 844 },
+    { "file": "PublicRoadmap.dc.html", "title": "공개 로드맵 보기 (/r/[id], 링크 전용)", "x": 2350, "y": 0, "w": 390, "h": 844 },
+    { "file": "Dashboard.dc.html", "title": "진행률 대시보드", "x": 0, "y": 964, "w": 390, "h": 844 },
+    { "file": "Coaching.dc.html", "title": "AI 코칭 메시지함", "x": 470, "y": 964, "w": 390, "h": 844 },
+    { "file": "Settings.dc.html", "title": "설정", "x": 940, "y": 964, "w": 390, "h": 844 },
+    { "file": "Leaderboard.dc.html", "title": "리더보드", "x": 1410, "y": 964, "w": 390, "h": 844 },
+    { "file": "Community.dc.html", "title": "커뮤니티 (공개 로드맵 둘러보기)", "x": 1880, "y": 964, "w": 390, "h": 844 }
+  ],
+  "annotations": [
+    { "id": "flow-note-1", "x": 0, "y": -70, "w": 2270, "text": "메인 플로우(로그인한 나): 로그인 → 홈 → 로드맵 생성 → 로드맵 상세(타임라인, 공개 전환+링크 복사) → 마일스톤 상세" },
+    { "id": "flow-note-public", "x": 2350, "y": -70, "w": 390, "text": "↑ 인앱 버튼으로 못 감. \"로드맵 상세\"에서 복사한 링크를 다른 사람(로그인 불필요)이 브라우저로 직접 열었을 때 나오는 화면" },
+    { "id": "flow-note-2", "x": 0, "y": 894, "w": 2270, "text": "하단 탭: 홈 / 대시보드 / AI 코칭 메시지함 / 리더보드 / 커뮤니티 / 설정(닉네임·리더보드 표시)" },
+    { "id": "flow-note-community", "x": 1880, "y": 1834, "w": 390, "text": "↑ 커뮤니티에서 항목을 누르면 \"공개 로드맵 보기\"(위 오른쪽 화면)로 이동" }
+  ],
+  "launch": { "view": "canvas" }
+}

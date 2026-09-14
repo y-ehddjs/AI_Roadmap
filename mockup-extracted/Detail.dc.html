@@ -1,0 +1,105 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: oklch(97% 0.015 75);
+      --surface: oklch(99% 0.004 75);
+      --text: oklch(22% 0.02 75);
+      --text-muted: oklch(52% 0.02 75);
+      --border: oklch(90% 0.015 75);
+      --accent: oklch(68% 0.16 55);
+      --accent-contrast: oklch(99% 0.01 55);
+      --accent-2: oklch(66% 0.14 150);
+      --accent-2-contrast: oklch(99% 0.01 150);
+    }
+    body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--text); }
+    h1, h2 { font-family: "Sora", system-ui, sans-serif; margin: 0; }
+    a { color: var(--accent); } a:hover { color: oklch(58% 0.16 55); }
+  </style>
+</helmet>
+<div style="width: 390px; height: 844px; background: var(--bg); overflow-y: auto; box-sizing: border-box; display: flex; flex-direction: column;">
+
+  <div style="padding: 24px 24px 0; display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+    <div style="width: 36px; height: 36px; border-radius: 12px; background: var(--surface); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+    </div>
+    <div style="flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px;">
+      <h1 style="font-size: 17px; text-align: center;">10km 마라톤 완주하기</h1>
+      <span style="font-size: 11px; font-weight: 600; color: oklch(48% 0.12 280);">AI 생성</span>
+    </div>
+    <div style="width: 36px; height: 36px; border-radius: 12px; background: var(--surface); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+    </div>
+  </div>
+
+  <div style="padding: 16px 24px 8px;">
+    <div style="background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 14px 18px; display: flex; flex-direction: column; gap: 8px;">
+      <div style="display: flex; justify-content: space-between; font-size: 13px; color: var(--text-muted);">
+        <span>전체 진행률</span>
+        <span style="font-weight: 700; color: var(--text);">42%</span>
+      </div>
+      <div style="height: 8px; background: var(--border); border-radius: 999px; overflow: hidden;">
+        <div style="width: 42%; height: 100%; background: var(--accent); border-radius: 999px;"></div>
+      </div>
+      <span style="font-size: 12px; color: var(--text-muted);">5개 마일스톤 중 2개 완료</span>
+    </div>
+  </div>
+
+  <div style="flex: 1; position: relative; padding: 24px 24px 40px;">
+    <svg width="342" height="700" viewBox="0 0 342 700" style="position: absolute; left: 24px; top: 24px; z-index: 0;">
+      <path d="M60,40 C60,115 280,115 280,190 C280,265 60,265 60,340 C60,415 280,415 280,490 C280,565 60,565 60,640"
+        fill="none" style="stroke: var(--border);" stroke-width="4" stroke-linecap="round" stroke-dasharray="1 14"/>
+    </svg>
+
+    <div style="position: absolute; left: 60px; top: 40px; transform: translate(-50%, -50%); z-index: 1; width: 56px; height: 56px; border-radius: 999px; background: var(--accent-2); display: flex; align-items: center; justify-content: center;">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l4 4L19 6"/></svg>
+    </div>
+    <div style="position: absolute; left: 100px; top: 40px; transform: translateY(-50%); width: 190px;">
+      <div style="font-size: 14px; font-weight: 600;">1km 완주</div>
+      <div style="font-size: 12px; color: var(--text-muted);">완료일 2/10</div>
+    </div>
+
+    <div style="position: absolute; left: 280px; top: 190px; transform: translate(-50%, -50%); z-index: 1; width: 56px; height: 56px; border-radius: 999px; background: var(--accent-2); display: flex; align-items: center; justify-content: center;">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l4 4L19 6"/></svg>
+    </div>
+    <div style="position: absolute; left: 40px; top: 190px; transform: translateY(-50%); width: 190px; text-align: right;">
+      <div style="font-size: 14px; font-weight: 600;">3km 완주</div>
+      <div style="font-size: 12px; color: var(--text-muted);">완료일 2/24</div>
+    </div>
+
+    <div style="position: absolute; left: 60px; top: 340px; transform: translate(-50%, -50%); z-index: 1; width: 64px; height: 64px; border-radius: 999px; background: var(--accent); box-shadow: 0 0 0 6px oklch(68% 0.16 55 / 18%); display: flex; align-items: center; justify-content: center;">
+      <span style="color: var(--accent-contrast); font-family: 'Sora', system-ui, sans-serif; font-weight: 700; font-size: 18px;">3</span>
+    </div>
+    <div style="position: absolute; left: 104px; top: 340px; transform: translateY(-50%); width: 190px;">
+      <div style="font-size: 15px; font-weight: 700;">5km 완주</div>
+      <div style="font-size: 12px; color: var(--accent); font-weight: 600;">마감일 3/15 · D-3</div>
+    </div>
+
+    <div style="position: absolute; left: 280px; top: 490px; transform: translate(-50%, -50%); z-index: 1; width: 56px; height: 56px; border-radius: 999px; background: var(--surface); border: 2px solid var(--border); display: flex; align-items: center; justify-content: center;">
+      <span style="color: var(--text-muted); font-family: 'Sora', system-ui, sans-serif; font-weight: 700; font-size: 16px;">4</span>
+    </div>
+    <div style="position: absolute; left: 40px; top: 490px; transform: translateY(-50%); width: 190px; text-align: right;">
+      <div style="font-size: 14px; font-weight: 600; color: var(--text-muted);">7km 완주</div>
+      <div style="font-size: 12px; color: var(--text-muted);">마감일 3/29</div>
+    </div>
+
+    <div style="position: absolute; left: 60px; top: 640px; transform: translate(-50%, -50%); z-index: 1; width: 56px; height: 56px; border-radius: 999px; background: var(--surface); border: 2px solid var(--border); display: flex; align-items: center; justify-content: center;">
+      <span style="color: var(--text-muted); font-family: 'Sora', system-ui, sans-serif; font-weight: 700; font-size: 16px;">5</span>
+    </div>
+    <div style="position: absolute; left: 100px; top: 640px; transform: translateY(-50%); width: 190px;">
+      <div style="font-size: 14px; font-weight: 600; color: var(--text-muted);">10km 완주</div>
+      <div style="font-size: 12px; color: var(--text-muted);">마감일 4/12</div>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

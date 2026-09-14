@@ -1,0 +1,80 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-top: #170b2e;
+      --bg-bottom: #2b0f3d;
+      --panel: #1c0f33;
+      --border: #0a0414;
+      --text: #f2e9ff;
+      --text-dim: #9a86c2;
+      --neon-pink: #ff2e8f;
+      --neon-cyan: #2ee6ff;
+      --neon-yellow: #ffe93f;
+    }
+    body { margin: 0; font-family: "Space Mono", monospace; color: var(--text); }
+    h1, h2, .display { font-family: "Press Start 2P", "Space Mono", monospace; }
+    a { color: var(--neon-cyan); } a:hover { color: var(--neon-pink); }
+  </style>
+</helmet>
+<div style="width: 320px; min-height: 640px; box-sizing: border-box; padding: 20px; display: flex; flex-direction: column; gap: 16px; position: relative; overflow: hidden; background: linear-gradient(180deg, var(--bg-top) 0%, var(--bg-bottom) 60%, #120821 100%);">
+
+  <!-- synthwave grid horizon -->
+  <svg width="320" height="160" viewBox="0 0 320 160" style="position: absolute; left: 0; bottom: 0; opacity: 0.35;">
+    <line x1="0" y1="20" x2="320" y2="20" stroke="#ff2e8f" stroke-width="1"/>
+    <line x1="0" y1="50" x2="320" y2="50" stroke="#ff2e8f" stroke-width="1"/>
+    <line x1="0" y1="90" x2="320" y2="90" stroke="#ff2e8f" stroke-width="1"/>
+    <line x1="0" y1="140" x2="320" y2="140" stroke="#ff2e8f" stroke-width="1"/>
+    <line x1="160" y1="0" x2="20" y2="160" stroke="#ff2e8f" stroke-width="1"/>
+    <line x1="160" y1="0" x2="90" y2="160" stroke="#ff2e8f" stroke-width="1"/>
+    <line x1="160" y1="0" x2="160" y2="160" stroke="#ff2e8f" stroke-width="1"/>
+    <line x1="160" y1="0" x2="230" y2="160" stroke="#ff2e8f" stroke-width="1"/>
+    <line x1="160" y1="0" x2="300" y2="160" stroke="#ff2e8f" stroke-width="1"/>
+  </svg>
+
+  <div style="position: relative; display: flex; align-items: center; justify-content: space-between;">
+    <span class="display" style="font-size: 10px; letter-spacing: 1px; color: var(--neon-cyan); text-shadow: 0 0 8px var(--neon-cyan);">ROADMAP</span>
+    <div style="background: var(--neon-yellow); border: 3px solid var(--border); border-radius: 8px; padding: 4px 8px; box-shadow: 3px 3px 0 var(--border), 0 0 14px rgba(255,233,63,0.5);">
+      <span class="display" style="font-size: 9px; color: var(--border);">5-DAY</span>
+    </div>
+  </div>
+
+  <div style="position: relative; background: var(--panel); border: 3px solid var(--border); border-radius: 12px; padding: 16px; box-shadow: 5px 5px 0 var(--border), 0 0 22px rgba(46,230,255,0.15); display: flex; flex-direction: column; gap: 10px;">
+    <div class="display" style="font-size: 11px; line-height: 1.6; color: var(--neon-pink); text-shadow: 0 0 6px rgba(255,46,143,0.6);">10KM MARATHON</div>
+    <div style="height: 12px; background: #0e0a1c; border: 2px solid var(--border); border-radius: 999px; overflow: hidden;">
+      <div style="width: 42%; height: 100%; background: var(--neon-cyan); box-shadow: 0 0 10px var(--neon-cyan);"></div>
+    </div>
+    <div style="display: flex; justify-content: space-between; font-size: 10px;">
+      <span style="color: var(--text-dim);">PROGRESS 42%</span>
+      <span style="color: var(--neon-yellow);">D-3</span>
+    </div>
+  </div>
+
+  <div style="position: relative; height: 220px; margin-top: 4px;">
+    <svg width="280" height="220" viewBox="0 0 280 220" style="position: absolute; left: 0; top: 0;">
+      <path d="M40,30 C40,90 240,90 240,150" fill="none" style="stroke: var(--neon-pink); opacity: 0.6;" stroke-width="3" stroke-linecap="round" stroke-dasharray="2 12"/>
+    </svg>
+    <div style="position: absolute; left: 40px; top: 30px; transform: translate(-50%,-50%); width: 52px; height: 52px; border-radius: 10px; background: var(--panel); border: 3px solid var(--neon-cyan); box-shadow: 3px 3px 0 var(--border), 0 0 16px rgba(46,230,255,0.6); display: flex; align-items: center; justify-content: center;">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--neon-cyan)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l4 4L19 6"/></svg>
+    </div>
+    <div style="position: absolute; left: 240px; top: 150px; transform: translate(-50%,-50%); width: 60px; height: 60px; border-radius: 10px; background: var(--neon-pink); border: 3px solid var(--border); box-shadow: 3px 3px 0 var(--border), 0 0 18px rgba(255,46,143,0.7); display: flex; align-items: center; justify-content: center;">
+      <span class="display" style="font-size: 16px; color: var(--border);">03</span>
+    </div>
+    <div style="position: absolute; left: 195px; top: 178px; color: var(--text-dim); font-size: 10px;">5KM RUN</div>
+  </div>
+
+  <button style="position: relative; width: 100%; min-height: 50px; background: var(--neon-pink); color: var(--border); border: 3px solid var(--border); border-radius: 12px; font-family: 'Press Start 2P', monospace; font-size: 10px; box-shadow: 4px 4px 0 var(--border), 0 0 20px rgba(255,46,143,0.5); cursor: pointer;">
+    + NEW QUEST
+  </button>
+</div>
+</x-dc>
+</body>
+</html>

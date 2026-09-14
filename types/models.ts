@@ -9,6 +9,7 @@ export interface Roadmap {
   description: string | null;
   source: RoadmapSource;
   status: RoadmapStatus;
+  is_public: boolean;
   created_at: string;
 }
 
@@ -51,4 +52,19 @@ export interface NotificationSettings {
   reminder_enabled: boolean;
   reminder_time: string;
   push_subscription: PushSubscriptionData | null;
+}
+
+export interface Profile {
+  id: string;
+  user_id: string;
+  display_name: string;
+  show_on_leaderboard: boolean;
+  created_at: string;
+}
+
+export interface MilestoneReaction {
+  id: string;
+  milestone_id: string;
+  user_id: string;
+  created_at: string;
 }

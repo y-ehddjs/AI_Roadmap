@@ -6,6 +6,7 @@ import { useRequireAuth } from '../../lib/useAuth';
 import { listRoadmaps } from '../../lib/roadmaps';
 import { listMilestones } from '../../lib/milestones';
 import { calculateProgress, milestoneStatus } from '../../lib/progress';
+import { recordCheckin, getTodayStreak } from '../../lib/checkins';
 import type { Roadmap, Milestone } from '../../types/models';
 
 interface RoadmapRow {
@@ -18,6 +19,20 @@ interface RoadmapRow {
 export default function HomePage() {
   const userId = useRequireAuth();
   const [rows, setRows] = useState<RoadmapRow[]>([]);
+  const [streak, setStreak] = useState(0);
+
+  useEffect(() => {
+    if (!userId) return;
+    async function loadStreak() {
+      setStreak(await getTodayStreak(supabase, userId as string, new Date()));
+    }
+    loadStreak();
+  }, [userId]);
+
+  async function handleCheckin() {
+    if (!userId) return;
+    setStreak(await recordCheckin(supabase, userId, new Date()));
+  }
 
   useEffect(() => {
     if (!userId) return;
@@ -47,7 +62,15 @@ export default function HomePage() {
 
   return (
     <div className="mx-auto max-w-3xl p-6">
-      <h1 className="text-2xl font-bold">내 목표</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">내 목표</h1>
+        <div className="flex items-center gap-3">
+          <span className="rounded-full bg-orange-100 px-3 py-1 text-sm font-semibold text-orange-700">{streak}일 연속</span>
+          <button className="rounded-lg border px-3 py-1 text-sm" onClick={handleCheckin}>
+            오늘 체크인
+          </button>
+        </div>
+      </div>
       <p className="mb-4 text-sm text-gray-500">{rows.length}개 진행 중 (완료된 로드맵은 대시보드에서 확인)</p>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         {rows.map((row) => (

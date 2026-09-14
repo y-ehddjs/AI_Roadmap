@@ -5,6 +5,7 @@ import { supabase } from '../../../lib/supabase';
 import { useRequireAuth } from '../../../lib/useAuth';
 import { updateMilestone, deleteMilestone } from '../../../lib/milestones';
 import { completeRoadmapIfAllDone } from '../../../lib/roadmaps';
+import { recordCheckin } from '../../../lib/checkins';
 import type { Milestone } from '../../../types/models';
 
 export default function MilestoneDetailPage() {
@@ -38,6 +39,9 @@ export default function MilestoneDetailPage() {
     setMilestone(updated);
     if (checked) {
       await completeRoadmapIfAllDone(supabase, milestone.roadmap_id);
+      if (userId) {
+        await recordCheckin(supabase, userId, new Date());
+      }
     }
   }
 

@@ -1,4 +1,4 @@
-import { createRoadmap, listRoadmaps, getRoadmap, deleteRoadmap } from '../lib/roadmaps';
+import { createRoadmap, listRoadmaps, getRoadmap, deleteRoadmap, completeRoadmapIfAllDone } from '../lib/roadmaps';
 import { makeFakeClient } from '../test-utils/fakeSupabaseClient';
 
 test('createRoadmap inserts and returns the created row', async () => {
@@ -43,4 +43,27 @@ test('deleteRoadmap deletes by id', async () => {
 test('deleteRoadmap throws when supabase returns an error', async () => {
   const client = makeFakeClient([{ data: null, error: new Error('delete failed') }]);
   await expect(deleteRoadmap(client, '1')).rejects.toThrow('delete failed');
+});
+
+test('completeRoadmapIfAllDone marks the roadmap completed when every milestone is done', async () => {
+  const client = makeFakeClient([
+    { data: [{ status: 'done' }, { status: 'done' }], error: null }, // listMilestones
+    { data: null, error: null }, // update
+  ]);
+  await completeRoadmapIfAllDone(client, 'r1');
+  expect(client.from).toHaveBeenCalledWith('roadmaps');
+});
+
+test('completeRoadmapIfAllDone does nothing when a milestone is still pending', async () => {
+  const client = makeFakeClient([
+    { data: [{ status: 'done' }, { status: 'pending' }], error: null }, // listMilestones
+  ]);
+  await completeRoadmapIfAllDone(client, 'r1');
+  expect(client.from).toHaveBeenCalledTimes(1); // only the listMilestones call
+});
+
+test('completeRoadmapIfAllDone does nothing for a roadmap with no milestones', async () => {
+  const client = makeFakeClient([{ data: [], error: null }]);
+  await completeRoadmapIfAllDone(client, 'r1');
+  expect(client.from).toHaveBeenCalledTimes(1);
 });

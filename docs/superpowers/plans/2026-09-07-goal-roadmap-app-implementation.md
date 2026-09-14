@@ -103,7 +103,6 @@ supabase/
       index.ts                       # 리마인더 Web Push 발송 (스케줄)
       schedule.ts                    # isReminderDue, selectMilestonesDueTomorrow (순수 함수)
       schedule.test.ts               # Deno test
-backend/                              # FastAPI 백엔드 스캐폴딩 — 5주차 프론트/백엔드 도커 컨테이너 분리 대비, 현재 태스크들은 아직 이 폴더를 쓰지 않음
 ```
 
 ---

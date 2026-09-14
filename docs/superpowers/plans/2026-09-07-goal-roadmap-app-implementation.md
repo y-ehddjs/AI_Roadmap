@@ -142,7 +142,7 @@ PostgREST, `{SUPABASE_URL}/rest/v1/<테이블명>` — 와 (2) AI 호출처럼 A
 | POST | `/auth/v1/signup` | 회원가입 (`supabase.auth.signUp`) | `{ email, password }` | `{ user, session }` — 성공 시 `handle_new_user` 트리거가 `notification_settings`/`profiles` 기본 행을 자동 생성 | 200, 422(이미 가입된 이메일), 400(형식 오류) |
 | POST | `/auth/v1/token?grant_type=password` | 로그인 (`signInWithPassword`) | `{ email, password }` | `{ access_token, refresh_token, user }` | 200, 400(이메일/비밀번호 불일치) |
 | POST | `/auth/v1/logout` | 로그아웃 (`signOut`, 설정 화면) | 없음(Authorization 헤더로 세션 식별) | 없음 | 204, 401 |
-| GET | `/auth/v1/user` | 세션 확인 (`getUser` — `useRequireAuth`/`useRedirectIfAuthed`가 마운트 시 호출) | 없음 | `{ user }` (비로그인 시 `user: null`) | 200 |
+| GET | `/auth/v1/user` | 세션 확인 (`getUser` — `useRequireAuth`/`useRedirectIfAuthed`가 마운트 시 호출), 그리고 설정 화면(8번)의 "계정" 카드가 이메일 표시를 위해 별도로 호출 | 없음 | `{ user }` (비로그인 시 `user: null`; `user.email`이 설정 화면에 표시하는 값) | 200 |
 
 ### 2. 로드맵 (화면 2/3/4/6, `lib/roadmaps.ts`, `roadmaps` 테이블)
 
@@ -2281,6 +2281,7 @@ export default function SettingsPage() {
   const [reminderEnabled, setReminderEnabled] = useState(true);
   const [reminderTime, setReminderTime] = useState('09:00');
   const [loaded, setLoaded] = useState(false);
+  const [email, setEmail] = useState<string | null>(null);
 
   useEffect(() => {
     if (!userId) return;
@@ -2300,6 +2301,16 @@ export default function SettingsPage() {
         setLoaded(true);
       });
   }, [userId]);
+
+  // "계정" 카드에 표시할 이메일 — profiles/notification_settings 어디에도 없고
+  // auth.users에만 있는 값이라, 이 화면에서만 필요한 별도 조회로 가져온다
+  // (useRequireAuth는 userId만 반환하고, 다른 태스크들도 그 계약에 기대고 있어
+  // 여기서 굳이 리턴 타입을 바꾸지 않는다).
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      setEmail(data.user?.email ?? null);
+    });
+  }, []);
 
   async function toggleReminder(value: boolean) {
     setReminderEnabled(value);
@@ -2348,6 +2359,7 @@ export default function SettingsPage() {
           onChange={(e) => handleReminderTimeChange(e.target.value)}
         />
       </div>
+      {email && <p className="text-sm text-gray-500">{email}</p>}
       <button className="rounded-lg border px-4 py-2" onClick={handleLogout}>
         로그아웃
       </button>
@@ -2409,7 +2421,8 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
 Run: `npm run dev` (HTTPS 또는 `localhost`에서 실행 — Web Push는 보안 컨텍스트 필요) →
 알림 받기를 켰을 때 브라우저 알림 권한 요청이 뜨는지, 허용 후
 `notification_settings.push_subscription`이 채워지는지, 로그아웃이 로그인 페이지로
-보내는지, 로그인 안 한 상태로 설정 페이지에 들어가면 로그인 페이지로 튕기는지 확인.
+보내는지, 로그인 안 한 상태로 설정 페이지에 들어가면 로그인 페이지로 튕기는지, 로그아웃
+버튼 위에 로그인한 계정의 이메일이 보이는지 확인.
 **추가로**: 알림을 끄고 시간을 다른 값으로 바꾼 뒤 페이지를 새로고침해서 체크박스와
 시간 입력이 방금 바꾼 값 그대로 유지되는지(DB에서 다시 불러왔는지), Supabase
 Studio에서 `notification_settings.reminder_time`이 실제로 바뀌었는지 확인
@@ -2418,7 +2431,7 @@ Studio에서 `notification_settings.reminder_time`이 실제로 바뀌었는지 
 
 ```bash
 git add lib/notifications.ts __tests__/notifications.test.ts public/sw.js app/\(dashboard\)/settings/page.tsx app/\(dashboard\)/layout.tsx
-git commit -m "feat: add web push subscription, settings page (loads existing values, editable reminder time), and subscription-refresh handling"
+git commit -m "feat: add web push subscription, settings page (loads existing values, editable reminder time, account email), and subscription-refresh handling"
 ```
 
 ---

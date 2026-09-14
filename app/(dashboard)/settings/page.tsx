@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '../../../lib/supabase';
 import { useRequireAuth } from '../../../lib/useAuth';
 import { subscribeToPush } from '../../../lib/notifications';
+import { getProfile, updateProfile } from '../../../lib/profiles';
 import type { NotificationSettings } from '../../../types/models';
 
 const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY as string;
@@ -15,6 +16,8 @@ export default function SettingsPage() {
   const [reminderTime, setReminderTime] = useState('09:00');
   const [loaded, setLoaded] = useState(false);
   const [email, setEmail] = useState<string | null>(null);
+  const [displayName, setDisplayName] = useState('');
+  const [showOnLeaderboard, setShowOnLeaderboard] = useState(false);
 
   useEffect(() => {
     if (!userId) return;
@@ -26,11 +29,15 @@ export default function SettingsPage() {
       .select('reminder_enabled, reminder_time')
       .eq('user_id', userId)
       .single()
-      .then(({ data }) => {
+      .then(async ({ data }) => {
         const settings = data as Pick<NotificationSettings, 'reminder_enabled' | 'reminder_time'> | null;
-        if (!settings) return;
-        setReminderEnabled(settings.reminder_enabled);
-        setReminderTime(settings.reminder_time.slice(0, 5));
+        if (settings) {
+          setReminderEnabled(settings.reminder_enabled);
+          setReminderTime(settings.reminder_time.slice(0, 5));
+        }
+        const profile = await getProfile(supabase, userId as string);
+        setDisplayName(profile.display_name);
+        setShowOnLeaderboard(profile.show_on_leaderboard);
         setLoaded(true);
       });
   }, [userId]);
@@ -65,6 +72,18 @@ export default function SettingsPage() {
       .upsert({ user_id: userId, reminder_time: value }, { onConflict: 'user_id' });
   }
 
+  async function handleDisplayNameChange(value: string) {
+    setDisplayName(value);
+    if (!userId) return;
+    await updateProfile(supabase, userId, { display_name: value });
+  }
+
+  async function handleShowOnLeaderboardChange(value: boolean) {
+    setShowOnLeaderboard(value);
+    if (!userId) return;
+    await updateProfile(supabase, userId, { show_on_leaderboard: value });
+  }
+
   async function handleLogout() {
     await supabase.auth.signOut();
     router.replace('/login');
@@ -92,6 +111,25 @@ export default function SettingsPage() {
           onChange={(e) => handleReminderTimeChange(e.target.value)}
         />
       </div>
+      <div className="flex flex-col gap-2">
+        <label className="text-sm text-gray-600" htmlFor="display-name">
+          닉네임 (리더보드/공개 화면에 표시)
+        </label>
+        <input
+          id="display-name"
+          className="rounded-lg border p-2"
+          value={displayName}
+          onChange={(e) => handleDisplayNameChange(e.target.value)}
+        />
+      </div>
+      <label className="flex items-center gap-2">
+        <input
+          type="checkbox"
+          checked={showOnLeaderboard}
+          onChange={(e) => handleShowOnLeaderboardChange(e.target.checked)}
+        />
+        리더보드에 표시
+      </label>
       {email && <p className="text-sm text-gray-500">{email}</p>}
       <button className="rounded-lg border px-4 py-2" onClick={handleLogout}>
         로그아웃

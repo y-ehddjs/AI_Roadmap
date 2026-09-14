@@ -30,6 +30,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
         <Link href="/dashboard">대시보드</Link>
         <Link href="/coaching">AI 코칭</Link>
         <Link href="/settings">설정</Link>
+        <Link href="/leaderboard">리더보드</Link>
       </nav>
       {children}
     </div>

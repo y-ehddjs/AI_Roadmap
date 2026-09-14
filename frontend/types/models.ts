@@ -62,9 +62,24 @@ export interface Profile {
   created_at: string;
 }
 
-export interface MilestoneReaction {
+export interface RoadmapReaction {
   id: string;
-  milestone_id: string;
+  roadmap_id: string;
   user_id: string;
+  created_at: string;
+}
+
+export interface Comment {
+  id: string;
+  roadmap_id: string;
+  user_id: string;
+  body: string;
+  created_at: string;
+}
+
+export interface Follow {
+  id: string;
+  follower_id: string;
+  followee_id: string;
   created_at: string;
 }

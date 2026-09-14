@@ -7,9 +7,12 @@ import { listPublicMilestones } from '../../../lib/milestones';
 import { calculateProgress, milestoneStatus } from '../../../lib/progress';
 import { computeNodePositions } from '../../../lib/timeline';
 import { hasReacted, getReactionCount, toggleReaction } from '../../../lib/reactions';
-import type { Roadmap, Milestone } from '../../../types/models';
+import { getProfile } from '../../../lib/profiles';
+import { isFollowing, follow, unfollow } from '../../../lib/follows';
+import { listComments, addComment } from '../../../lib/comments';
+import type { Roadmap, Milestone, Comment } from '../../../types/models';
 
-type PublicRoadmap = Pick<Roadmap, 'id' | 'title'>;
+type PublicRoadmap = Pick<Roadmap, 'id' | 'title' | 'user_id'>;
 type PublicMilestone = Pick<Milestone, 'id' | 'title' | 'due_date' | 'order_index' | 'status'>;
 
 export default function PublicRoadmapPage() {
@@ -18,7 +21,12 @@ export default function PublicRoadmapPage() {
   const [milestones, setMilestones] = useState<PublicMilestone[]>([]);
   const [notFound, setNotFound] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
-  const [reactions, setReactions] = useState<Record<string, { count: number; reacted: boolean }>>({});
+  const [ownerName, setOwnerName] = useState<string>('');
+  const [heartCount, setHeartCount] = useState(0);
+  const [reacted, setReacted] = useState(false);
+  const [following, setFollowing] = useState(false);
+  const [comments, setComments] = useState<Comment[]>([]);
+  const [commentBody, setCommentBody] = useState('');
 
   useEffect(() => {
     if (!id) return;
@@ -26,6 +34,8 @@ export default function PublicRoadmapPage() {
       .then(async (r) => {
         setRoadmap(r);
         setMilestones(await listPublicMilestones(supabase, id));
+        const profile = await getProfile(supabase, r.user_id);
+        setOwnerName(profile.display_name);
       })
       .catch(() => setNotFound(true));
   }, [id]);
@@ -35,25 +45,40 @@ export default function PublicRoadmapPage() {
   }, []);
 
   useEffect(() => {
-    if (milestones.length === 0) return;
-    Promise.all(
-      milestones.map(async (m) => ({
-        id: m.id,
-        count: await getReactionCount(supabase, m.id),
-        reacted: userId ? await hasReacted(supabase, m.id, userId) : false,
-      }))
-    ).then((results) => {
-      setReactions(Object.fromEntries(results.map((r) => [r.id, { count: r.count, reacted: r.reacted }])));
-    });
-  }, [milestones, userId]);
+    if (!roadmap) return;
+    getReactionCount(supabase, roadmap.id).then(setHeartCount);
+    if (userId) hasReacted(supabase, roadmap.id, userId).then(setReacted);
+    listComments(supabase, roadmap.id).then(setComments);
+  }, [roadmap, userId]);
 
-  async function handleHighFive(milestoneId: string) {
-    if (!userId) return;
-    const nowReacted = await toggleReaction(supabase, milestoneId, userId);
-    setReactions((prev) => ({
-      ...prev,
-      [milestoneId]: { count: (prev[milestoneId]?.count ?? 0) + (nowReacted ? 1 : -1), reacted: nowReacted },
-    }));
+  useEffect(() => {
+    if (!roadmap || !userId || userId === roadmap.user_id) return;
+    isFollowing(supabase, userId, roadmap.user_id).then(setFollowing);
+  }, [roadmap, userId]);
+
+  async function handleHeart() {
+    if (!roadmap || !userId) return;
+    const nowReacted = await toggleReaction(supabase, roadmap.id, userId);
+    setReacted(nowReacted);
+    setHeartCount((prev) => prev + (nowReacted ? 1 : -1));
+  }
+
+  async function handleToggleFollow() {
+    if (!roadmap || !userId) return;
+    if (following) {
+      await unfollow(supabase, userId, roadmap.user_id);
+      setFollowing(false);
+    } else {
+      await follow(supabase, userId, roadmap.user_id);
+      setFollowing(true);
+    }
+  }
+
+  async function handleAddComment() {
+    if (!roadmap || !userId || !commentBody.trim()) return;
+    const created = await addComment(supabase, roadmap.id, userId, commentBody.trim());
+    setComments((prev) => [...prev, created]);
+    setCommentBody('');
   }
 
   if (notFound) {
@@ -69,14 +94,41 @@ export default function PublicRoadmapPage() {
   const now = new Date();
   const positions = computeNodePositions(milestones.length);
   const pathHeight = 40 + milestones.length * 140 + 100;
+  const isOwner = userId === roadmap.user_id;
 
   return (
     <div className="mx-auto max-w-2xl p-6">
       <h1 className="text-xl font-bold">{roadmap.title}</h1>
-      <p className="text-sm text-gray-600">
+      <div className="mt-1 flex items-center justify-between">
+        <p className="text-sm text-gray-600">{ownerName}</p>
+        {!isOwner && userId && (
+          <button
+            className={`rounded-full border px-3 py-1 text-xs ${
+              following ? 'bg-gray-100 text-gray-700' : 'bg-orange-500 text-white'
+            }`}
+            onClick={handleToggleFollow}
+          >
+            {following ? '팔로잉' : '팔로우'}
+          </button>
+        )}
+      </div>
+      <p className="mt-2 text-sm text-gray-600">
         전체 진행률 {progress.percent}% ({progress.completedCount}/{progress.totalCount})
       </p>
-      <div className="relative mt-4" style={{ height: pathHeight }}>
+      <button
+        className={`mt-2 flex items-center gap-1 rounded-full border px-3 py-1.5 text-sm ${
+          reacted ? 'bg-rose-500 text-white' : 'bg-white text-gray-600'
+        } ${!userId ? 'opacity-60' : ''}`}
+        onClick={handleHeart}
+        disabled={!userId}
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill={reacted ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2">
+          <path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8z" />
+        </svg>
+        {heartCount}
+      </button>
+
+      <div className="relative mt-6" style={{ height: pathHeight }}>
         {milestones.map((milestone, index) => {
           const pos = positions[index];
           const status = milestoneStatus(milestone, now);
@@ -95,31 +147,33 @@ export default function PublicRoadmapPage() {
               </div>
               <span className="text-sm font-medium">{milestone.title}</span>
               <span className="text-xs text-gray-500">{milestone.due_date}</span>
-              {userId ? (
-                <button
-                  className={`mt-1 flex items-center gap-1 rounded-full border px-2 py-1 text-xs ${
-                    reactions[milestone.id]?.reacted ? 'bg-orange-500 text-white' : 'bg-white text-gray-600'
-                  }`}
-                  onClick={() => handleHighFive(milestone.id)}
-                >
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3z" />
-                    <path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
-                  </svg>
-                  {reactions[milestone.id]?.count ?? 0}
-                </button>
-              ) : (
-                <span className="mt-1 flex items-center gap-1 text-xs text-gray-500">
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3z" />
-                    <path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
-                  </svg>
-                  {reactions[milestone.id]?.count ?? 0}
-                </span>
-              )}
             </div>
           );
         })}
+      </div>
+
+      <div className="mt-6 border-t pt-4">
+        <h2 className="text-sm font-semibold">댓글 {comments.length}</h2>
+        <ul className="mt-2 space-y-2">
+          {comments.map((comment) => (
+            <li key={comment.id} className="rounded-lg bg-gray-50 p-2 text-sm">
+              {comment.body}
+            </li>
+          ))}
+        </ul>
+        {userId && (
+          <div className="mt-3 flex gap-2">
+            <input
+              className="flex-1 rounded-lg border p-2 text-sm"
+              placeholder="댓글을 남겨보세요"
+              value={commentBody}
+              onChange={(e) => setCommentBody(e.target.value)}
+            />
+            <button className="rounded-lg bg-orange-500 px-3 py-2 text-sm text-white" onClick={handleAddComment}>
+              등록
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

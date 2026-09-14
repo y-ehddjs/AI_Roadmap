@@ -4,29 +4,14 @@ export interface CommunityEntry {
   roadmapId: string;
   title: string;
   ownerName: string;
-  highFiveCount: number;
+  heartCount: number;
 }
 
 // roadmaps와 profiles는 둘 다 auth.users를 참조할 뿐 서로 직접 FK로 안 묶여있어서
 // PostgREST가 자동으로 조인(embedding)해주지 못한다 — user_id를 키 삼아 두 번
 // 조회해서 직접 합친다(리더보드, Task 25와 같은 패턴).
-async function countHighFivesForRoadmap(
-  client: SupabaseClient,
-  roadmapId: string,
-  since?: string
-): Promise<number> {
-  const { data: milestoneRows, error: milestoneError } = await client
-    .from('milestones')
-    .select('id')
-    .eq('roadmap_id', roadmapId);
-  if (milestoneError) throw milestoneError;
-  const milestoneIds = (milestoneRows ?? []).map((m: { id: string }) => m.id);
-  if (milestoneIds.length === 0) return 0;
-
-  let query = client
-    .from('milestone_reactions')
-    .select('id', { count: 'exact', head: true })
-    .in('milestone_id', milestoneIds);
+async function countHeartsForRoadmap(client: SupabaseClient, roadmapId: string, since?: string): Promise<number> {
+  let query = client.from('roadmap_reactions').select('id', { count: 'exact', head: true }).eq('roadmap_id', roadmapId);
   if (since) {
     query = query.gte('created_at', since);
   }
@@ -78,7 +63,7 @@ export async function listCommunityRoadmaps(
 
   const entries = await Promise.all(
     roadmaps.map(async (r: { id: string; title: string; user_id: string }) => {
-      const highFiveCount = await countHighFivesForRoadmap(
+      const heartCount = await countHeartsForRoadmap(
         client,
         r.id,
         sortBy === 'today' ? todayStart.toISOString() : undefined
@@ -87,10 +72,10 @@ export async function listCommunityRoadmaps(
         roadmapId: r.id,
         title: r.title,
         ownerName: nameByUserId.get(r.user_id) ?? '알 수 없음',
-        highFiveCount,
+        heartCount,
       };
     })
   );
 
-  return entries.sort((a, b) => b.highFiveCount - a.highFiveCount);
+  return entries.sort((a, b) => b.heartCount - a.heartCount);
 }

@@ -74,8 +74,8 @@ test('setRoadmapPublic updates the is_public flag', async () => {
   expect(client.from).toHaveBeenCalledWith('roadmaps');
 });
 
-test('getPublicRoadmap only returns id and title', async () => {
-  const row = { id: 'r1', title: 'Test' };
+test('getPublicRoadmap returns id, title, and user_id', async () => {
+  const row = { id: 'r1', title: 'Test', user_id: 'u1' };
   const client = makeFakeClient([{ data: row, error: null }]);
   const result = await getPublicRoadmap(client, 'r1');
   expect(result).toEqual(row);

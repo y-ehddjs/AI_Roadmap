@@ -5001,3 +5001,63 @@ Run: `npm run dev` → 로드맵 2~3개를 공개로 전환하고 서로 하이�
 git add lib/community.ts __tests__/community.test.ts app/\(dashboard\)/community/page.tsx app/\(dashboard\)/layout.tsx test-utils/fakeSupabaseClient.ts
 git commit -m "feat: add community page to browse public roadmaps by high-fives and nickname search"
 ```
+
+---
+
+## 하트/댓글/팔로우 기능 (하이파이브 폐지, 팔로우 기반 리더보드)
+
+강사 피드백 이후 사용자 요청으로 Task 21~25의 마일스톤 단위 하이파이브/전체
+공개 스트릭 리더보드를 다음과 같이 교체한 확장. "마일스톤별 응원"보다
+"로드맵 전체에 대한 응원"이 커뮤니티 성격에 더 맞고, 리더보드도 전체 공개
+대신 팔로우한 사람 한정 + 하트/진행률 기준으로 바뀌었다.
+
+### Task 27: 하이파이브 → 로드맵 단위 하트로 교체 + 댓글/팔로우 테이블 추가
+
+**Files:**
+- Create: `supabase/migrations/0003_hearts_comments_follows.sql` — `milestone_reactions`를
+  `drop table`하고 `roadmap_reactions`(로드맵 단위, `unique(roadmap_id, user_id)`),
+  `comments`, `follows`(`unique(follower_id, followee_id)`, `check(follower_id <> followee_id)`)를
+  신설. RLS는 `milestone_reactions` 때와 같은 public_read/owner_read OR 조합 패턴을
+  그대로 따른다. `follows`는 팔로우한 사람 자신만 자기 팔로우 목록을 읽을 수 있게
+  제한(다른 사람이 나를 팔로우하는지는 공개하지 않음 — YAGNI).
+- Modify: `types/models.ts` — `MilestoneReaction` 제거, `RoadmapReaction`/`Comment`/`Follow` 추가
+- Modify: `lib/reactions.ts` — `milestone_id` 대신 `roadmap_id`로 동작하도록 전면 교체
+  (함수 시그니처 `hasReacted`/`getReactionCount`/`toggleReaction`은 그대로 유지)
+- Create: `lib/comments.ts` (`listComments`/`addComment`/`deleteComment`)
+- Create: `lib/follows.ts` (`isFollowing`/`follow`/`unfollow`/`listFollowedUserIds`)
+- Modify: `lib/community.ts` — 마일스톤을 거쳐 두 번 조회하던 `countHighFivesForRoadmap`을
+  `roadmap_reactions`를 직접 세는 `countHeartsForRoadmap`으로 단순화,
+  `CommunityEntry.highFiveCount` → `heartCount`로 개명
+- Modify: `lib/leaderboard.ts` — 전체 공개 opt-in 스트릭 순위 대신, 뷰어 자신 +
+  뷰어가 팔로우한 사람들(`listFollowedUserIds`) 중 `show_on_leaderboard=true`인
+  사람만 대상으로, 공개 로드맵 전체의 하트 합(`heartCount`)과 평균 진행률
+  (`progressPercent`, `calculateProgress` 재사용)을 단순 합산한 `score`로 정렬.
+  (합산 방식은 "하트받은수랑 진행률로 따지게"라는 요청을 그대로 구현한 것이며,
+  가중치 정규화는 하지 않음 — 추후 밸런스 조정이 필요하면 여기서 손봐야 함)
+- Modify: `app/r/[id]/page.tsx` — 마일스톤별 하이파이브 버튼 제거, 로드맵
+  상단에 하트 버튼 1개 + 댓글 목록/입력 + 소유자 닉네임과 팔로우/언팔로우 버튼 추가
+  (`getPublicRoadmap`이 이제 `user_id`도 함께 반환하도록 확장)
+- Modify: `app/(dashboard)/leaderboard/page.tsx` — 카피/표시 항목을
+  "스트릭"에서 "하트 수 · 진행률"로, 대상 설명을 "팔로우한 사람(+나)"으로 변경
+- Modify: `app/(dashboard)/community/page.tsx` — "하이파이브" 문구를 "하트"로 교체
+
+**검증:**
+- `npx jest` — 전체 스위트(17 suites, 73 tests) 통과 확인
+- `npx tsc --noEmit` — 타입 에러 없음 확인
+- `supabase db reset` 후 컨테이너 내 `psql \dt public.*`로 스키마 반영 확인
+  (`milestone_reactions` 삭제, `roadmap_reactions`/`comments`/`follows` 생성 확인)
+- 실제 로컬 Supabase에 테스트 유저 2명 + 공개 로드맵 1개를 만들어 REST API로
+  하트 등록/중복 등록 거부(`23505`)/댓글 등록/팔로우 등록/자기 팔로우 거부
+  (`23514`)/팔로우 목록 RLS 격리(다른 사용자가 내 팔로우 목록을 못 읽음)를
+  모두 실제로 호출해 확인
+
+- [ ] **Step: 커밋**
+
+```bash
+git add supabase/migrations/0003_hearts_comments_follows.sql types/models.ts \
+  lib/reactions.ts __tests__/reactions.test.ts lib/comments.ts __tests__/comments.test.ts \
+  lib/follows.ts __tests__/follows.test.ts lib/community.ts __tests__/community.test.ts \
+  lib/leaderboard.ts __tests__/leaderboard.test.ts lib/roadmaps.ts __tests__/roadmaps.test.ts \
+  app/r/\[id\]/page.tsx app/\(dashboard\)/leaderboard/page.tsx app/\(dashboard\)/community/page.tsx
+git commit -m "feat: replace milestone high-fives with roadmap-level hearts, add comments and follow-gated leaderboard"
+```

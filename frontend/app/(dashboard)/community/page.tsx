@@ -24,7 +24,7 @@ export default function CommunityPage() {
           className={`rounded-lg px-3 py-2 text-sm ${sortBy === 'today' ? 'bg-orange-500 text-white' : 'border'}`}
           onClick={() => setSortBy('today')}
         >
-          오늘 하이파이브순
+          오늘 하트순
         </button>
         <button
           className={`rounded-lg px-3 py-2 text-sm ${sortBy === 'total' ? 'bg-orange-500 text-white' : 'border'}`}
@@ -48,7 +48,7 @@ export default function CommunityPage() {
             <Link href={`/r/${entry.roadmapId}`} className="block rounded-xl border p-3">
               <p className="font-medium">{entry.title}</p>
               <p className="text-sm text-gray-600">
-                {entry.ownerName} · 하이파이브 {entry.highFiveCount}
+                {entry.ownerName} · 하트 {entry.heartCount}
               </p>
             </Link>
           </li>

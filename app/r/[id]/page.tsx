@@ -6,6 +6,7 @@ import { getPublicRoadmap } from '../../../lib/roadmaps';
 import { listPublicMilestones } from '../../../lib/milestones';
 import { calculateProgress, milestoneStatus } from '../../../lib/progress';
 import { computeNodePositions } from '../../../lib/timeline';
+import { hasReacted, getReactionCount, toggleReaction } from '../../../lib/reactions';
 import type { Roadmap, Milestone } from '../../../types/models';
 
 type PublicRoadmap = Pick<Roadmap, 'id' | 'title'>;
@@ -16,6 +17,8 @@ export default function PublicRoadmapPage() {
   const [roadmap, setRoadmap] = useState<PublicRoadmap | null>(null);
   const [milestones, setMilestones] = useState<PublicMilestone[]>([]);
   const [notFound, setNotFound] = useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [reactions, setReactions] = useState<Record<string, { count: number; reacted: boolean }>>({});
 
   useEffect(() => {
     if (!id) return;
@@ -26,6 +29,32 @@ export default function PublicRoadmapPage() {
       })
       .catch(() => setNotFound(true));
   }, [id]);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id ?? null));
+  }, []);
+
+  useEffect(() => {
+    if (milestones.length === 0) return;
+    Promise.all(
+      milestones.map(async (m) => ({
+        id: m.id,
+        count: await getReactionCount(supabase, m.id),
+        reacted: userId ? await hasReacted(supabase, m.id, userId) : false,
+      }))
+    ).then((results) => {
+      setReactions(Object.fromEntries(results.map((r) => [r.id, { count: r.count, reacted: r.reacted }])));
+    });
+  }, [milestones, userId]);
+
+  async function handleHighFive(milestoneId: string) {
+    if (!userId) return;
+    const nowReacted = await toggleReaction(supabase, milestoneId, userId);
+    setReactions((prev) => ({
+      ...prev,
+      [milestoneId]: { count: (prev[milestoneId]?.count ?? 0) + (nowReacted ? 1 : -1), reacted: nowReacted },
+    }));
+  }
 
   if (notFound) {
     return (
@@ -66,7 +95,28 @@ export default function PublicRoadmapPage() {
               </div>
               <span className="text-sm font-medium">{milestone.title}</span>
               <span className="text-xs text-gray-500">{milestone.due_date}</span>
-              {/* 하이파이브 버튼은 Task 24에서 이 자리에 추가한다 */}
+              {userId ? (
+                <button
+                  className={`mt-1 flex items-center gap-1 rounded-full border px-2 py-1 text-xs ${
+                    reactions[milestone.id]?.reacted ? 'bg-orange-500 text-white' : 'bg-white text-gray-600'
+                  }`}
+                  onClick={() => handleHighFive(milestone.id)}
+                >
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3z" />
+                    <path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
+                  </svg>
+                  {reactions[milestone.id]?.count ?? 0}
+                </button>
+              ) : (
+                <span className="mt-1 flex items-center gap-1 text-xs text-gray-500">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3z" />
+                    <path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
+                  </svg>
+                  {reactions[milestone.id]?.count ?? 0}
+                </span>
+              )}
             </div>
           );
         })}

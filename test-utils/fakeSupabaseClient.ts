@@ -1,4 +1,4 @@
-export type FakeResult = { data: unknown; error: unknown };
+export type FakeResult = { data: unknown; error: unknown; count?: number };
 
 export function makeFakeClient(results: FakeResult[]) {
   let index = 0;

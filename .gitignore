@@ -1,22 +1,27 @@
 # Python (backend/)
+.venv/
+venv/
 __pycache__/
 *.pyc
-.venv/
 .pytest_cache/
+*.egg-info/
 
-# Node (frontend)
+# Node (frontend/)
 node_modules/
 .next/
-/out/
-/build
-/coverage
+.swc/
+dist/
+build/
+out/
+coverage/
 *.tsbuildinfo
 next-env.d.ts
 npm-debug.log*
 
-# Env files
+# Env files (both backend/ and frontend/)
 .env
-.env*.local
+.env.local
+.env.*.local
 
 # OS
 .DS_Store

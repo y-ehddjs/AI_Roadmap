@@ -7,6 +7,7 @@ import { useRequireAuth } from '../../../lib/useAuth';
 import { getRoadmap, deleteRoadmap } from '../../../lib/roadmaps';
 import { listMilestones, createMilestone } from '../../../lib/milestones';
 import { calculateProgress, milestoneStatus } from '../../../lib/progress';
+import { computeNodePositions } from '../../../lib/timeline';
 import type { Roadmap, Milestone } from '../../../types/models';
 
 export default function RoadmapDetailPage() {
@@ -59,6 +60,8 @@ export default function RoadmapDetailPage() {
   if (!roadmap) return null;
   const progress = calculateProgress(milestones);
   const now = new Date();
+  const positions = computeNodePositions(milestones.length);
+  const pathHeight = 40 + milestones.length * 140 + 100;
 
   return (
     <div className="mx-auto max-w-2xl p-6">
@@ -93,7 +96,7 @@ export default function RoadmapDetailPage() {
         </div>
       </div>
 
-      <ul className="mt-4 space-y-2">
+      <ul className="mt-4 space-y-2 sm:hidden">
         {milestones.map((milestone) => {
           const status = milestoneStatus(milestone, now);
           return (
@@ -108,6 +111,31 @@ export default function RoadmapDetailPage() {
           );
         })}
       </ul>
+
+      <div className="relative mt-4 hidden sm:block" style={{ height: pathHeight }}>
+        {milestones.map((milestone, index) => {
+          const pos = positions[index];
+          const status = milestoneStatus(milestone, now);
+          return (
+            <Link
+              key={milestone.id}
+              href={`/milestone/${milestone.id}`}
+              className="absolute flex -translate-x-1/2 flex-col items-center gap-1 text-center"
+              style={{ left: `${pos.xPercent * 100}%`, top: pos.y }}
+            >
+              <div
+                className={`flex h-14 w-14 items-center justify-center rounded-full font-semibold text-white ${
+                  status === 'done' ? 'bg-green-500' : status === 'overdue' ? 'bg-red-500' : 'bg-gray-200 !text-gray-700'
+                }`}
+              >
+                {index + 1}
+              </div>
+              <span className="text-sm font-medium">{milestone.title}</span>
+              <span className="text-xs text-gray-500">{milestone.due_date}</span>
+            </Link>
+          );
+        })}
+      </div>
     </div>
   );
 }

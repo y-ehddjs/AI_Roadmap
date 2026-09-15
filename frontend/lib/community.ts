@@ -9,15 +9,28 @@ export interface CommunityEntry {
 
 // roadmaps와 profiles는 둘 다 auth.users를 참조할 뿐 서로 직접 FK로 안 묶여있어서
 // PostgREST가 자동으로 조인(embedding)해주지 못한다 — user_id를 키 삼아 두 번
-// 조회해서 직접 합친다(리더보드, Task 25와 같은 패턴).
-async function countHeartsForRoadmap(client: SupabaseClient, roadmapId: string, since?: string): Promise<number> {
-  let query = client.from('roadmap_reactions').select('id', { count: 'exact', head: true }).eq('roadmap_id', roadmapId);
+// 조회해서 직접 합친다(리더보드와 같은 패턴).
+//
+// 로드맵 개수만큼 반복 호출하는 대신(N+1), 한 번의 in() 조회로 모든 로드맵의
+// roadmap_reactions 행을 가져와 클라이언트에서 roadmap_id별로 세는 방식 —
+// lib/leaderboard.ts의 하트 합산 로직과 같은 패턴이다.
+async function countHeartsByRoadmap(
+  client: SupabaseClient,
+  roadmapIds: string[],
+  since?: string
+): Promise<Map<string, number>> {
+  if (roadmapIds.length === 0) return new Map();
+  let query = client.from('roadmap_reactions').select('roadmap_id').in('roadmap_id', roadmapIds);
   if (since) {
     query = query.gte('created_at', since);
   }
-  const { count, error } = await query;
+  const { data, error } = await query;
   if (error) throw error;
-  return count ?? 0;
+  const counts = new Map<string, number>();
+  for (const row of (data ?? []) as { roadmap_id: string }[]) {
+    counts.set(row.roadmap_id, (counts.get(row.roadmap_id) ?? 0) + 1);
+  }
+  return counts;
 }
 
 export async function listCommunityRoadmaps(
@@ -61,21 +74,19 @@ export async function listCommunityRoadmaps(
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
 
-  const entries = await Promise.all(
-    roadmaps.map(async (r: { id: string; title: string; user_id: string }) => {
-      const heartCount = await countHeartsForRoadmap(
-        client,
-        r.id,
-        sortBy === 'today' ? todayStart.toISOString() : undefined
-      );
-      return {
-        roadmapId: r.id,
-        title: r.title,
-        ownerName: nameByUserId.get(r.user_id) ?? '알 수 없음',
-        heartCount,
-      };
-    })
+  const roadmapIds = roadmaps.map((r: { id: string }) => r.id);
+  const heartCounts = await countHeartsByRoadmap(
+    client,
+    roadmapIds,
+    sortBy === 'today' ? todayStart.toISOString() : undefined
   );
+
+  const entries = roadmaps.map((r: { id: string; title: string; user_id: string }) => ({
+    roadmapId: r.id,
+    title: r.title,
+    ownerName: nameByUserId.get(r.user_id) ?? '알 수 없음',
+    heartCount: heartCounts.get(r.id) ?? 0,
+  }));
 
   return entries.sort((a, b) => b.heartCount - a.heartCount);
 }

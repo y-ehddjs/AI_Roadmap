@@ -48,6 +48,7 @@
 | PATCH | `/rest/v1/roadmaps?id=eq.{roadmapId}` | `setRoadmapPublic` — 공개/비공개 전환 | `{ is_public: boolean }` | 없음 | 204 |
 | DELETE | `/rest/v1/roadmaps?id=eq.{roadmapId}` | `deleteRoadmap` (`on delete cascade`로 마일스톤/하트/댓글도 함께 삭제) | 없음 | 없음 | 204 |
 | GET | `/rest/v1/roadmaps?select=id,title,user_id&id=eq.{roadmapId}` | `getPublicRoadmap` — 공개 로드맵 보기(`/r/[id]`, 비로그인 가능). `description` 등 개인 정보 컬럼은 select하지 않음. `user_id`는 소유자 표시/팔로우 버튼에 필요해서 포함 | 없음 | `{ id, title, user_id }` | 200, 406(비공개거나 없는 id) |
+| PATCH | `/rest/v1/roadmaps?id=eq.{roadmapId}` | `reactivateRoadmap` — 완료 처리됐던 로드맵에 마일스톤을 새로 추가하면 다시 진행 중으로 되돌림 | `{ status: 'active' }` | 없음 | 204 |
 
 ## 3. 마일스톤 (`lib/milestones.ts`, `milestones` 테이블)
 
@@ -55,7 +56,7 @@
 |---|---|---|---|---|---|
 | POST | `/rest/v1/milestones` | `createMilestone` | `{ roadmap_id, title, description, due_date, order_index, status: 'pending' }` | `Milestone` 단일 행 | 201 |
 | GET | `/rest/v1/milestones?select=*&roadmap_id=eq.{roadmapId}&order=due_date.asc&order=order_index.asc` | `listMilestones` — 로드맵 상세 타임라인 | 없음 | `Milestone[]` | 200 |
-| GET | `/rest/v1/milestones?select=*&id=eq.{id}` | 마일스톤 상세 진입 | 없음 | `Milestone` 단일 행 | 200, 406 |
+| GET | `/rest/v1/milestones?select=*&id=eq.{id}` | `getMilestone` — 마일스톤 상세 진입 | 없음 | `Milestone` 단일 행 | 200, 406(없거나 남의 것 — 화면은 "찾을 수 없거나 접근 권한이 없는 마일스톤이에요" 문구로 처리) |
 | PATCH | `/rest/v1/milestones?id=eq.{milestoneId}` | `updateMilestone` — 체크/메모/마감일 수정 | `Partial<{ title, description, due_date, status, completed_at }>` | `Milestone` 단일 행 | 200 |
 | DELETE | `/rest/v1/milestones?id=eq.{milestoneId}` | `deleteMilestone` | 없음 | 없음 | 204 |
 | GET | `/rest/v1/milestones?select=id,title,due_date,order_index,status&roadmap_id=eq.{roadmapId}&order=due_date.asc&order=order_index.asc` | `listPublicMilestones` — 공개 로드맵 보기 | 없음 | `Pick<Milestone,'id'\|'title'\|'due_date'\|'order_index'\|'status'>[]` | 200 |
@@ -147,11 +148,13 @@ RLS: `follows`는 팔로우한 사람(`follower`) 본인만 자기 팔로우 목
 | GET | `/rest/v1/profiles?select=user_id&display_name=ilike.*{검색어}*` | `listCommunityRoadmaps` — 닉네임 검색 시에만 먼저 호출, 매칭되는 사람이 없으면 바로 빈 배열 반환 | 없음 | `{ user_id }[]` | 200 |
 | GET | `/rest/v1/roadmaps?select=id,title,user_id&is_public=eq.true` (검색어가 있으면 `&user_id=in.({위 목록})` 추가) | `listCommunityRoadmaps` — 공개 로드맵 목록 | 없음 | `{ id, title, user_id }[]` | 200 |
 | GET | `/rest/v1/profiles?select=user_id,display_name&user_id=in.({로드맵 소유자 id 목록})` | 목록에 표시할 소유자 닉네임 조회 | 없음 | `{ user_id, display_name }[]` | 200 |
-| HEAD | `/rest/v1/roadmap_reactions?select=id&roadmap_id=eq.{roadmapId}` (`Prefer: count=exact`; "오늘 하트순" 정렬이면 `&created_at=gte.{오늘 자정 ISO}` 추가) | `countHeartsForRoadmap` — 로드맵당 하트 개수 | 없음 | 없음(개수는 Content-Range) | 200 |
+| GET | `/rest/v1/roadmap_reactions?select=roadmap_id&roadmap_id=in.({공개 로드맵 id 목록})` ("오늘 하트순" 정렬이면 `&created_at=gte.{오늘 자정 ISO}` 추가) | `countHeartsByRoadmap` — 모든 공개 로드맵의 하트 행을 한 번에 가져와 클라이언트에서 `roadmap_id`별로 센다 | 없음 | `{ roadmap_id }[]` | 200 |
 
-(과거에는 로드맵 → 마일스톤 id 목록 → `milestone_reactions` 순으로 두 단계를
-거쳤으나, 하트가 로드맵 단위로 바뀌면서 `roadmap_reactions`를 바로 세는
-한 단계로 단순화됐다.)
+(과거에는 로드맵마다 개별 HEAD 카운트 쿼리를 날렸다(N+1) — 로드맵 개수만큼
+왕복이 늘어나는 구조였다. 리더보드의 하트 합산 로직과 같은 패턴으로,
+`in()` 한 번에 가져와 세는 방식으로 단순화했다. 그 이전에는 로드맵 →
+마일스톤 id 목록 → `milestone_reactions` 순으로 두 단계를 거쳤으나, 하트가
+로드맵 단위로 바뀌면서 그 중간 단계는 이미 없어졌었다.)
 
 ## 13. FastAPI 백엔드 (AI/알림 전용 커스텀 엔드포인트, `backend/`)
 

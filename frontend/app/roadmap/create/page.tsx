@@ -23,6 +23,7 @@ export default function CreateRoadmapPage() {
   const [mode, setMode] = useState<'ai' | 'manual'>('ai');
   const [aiDescription, setAiDescription] = useState('');
   const [aiError, setAiError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   function addDraftMilestone() {
     if (!milestoneTitle || !milestoneDue) return;
@@ -36,18 +37,24 @@ export default function CreateRoadmapPage() {
   }
 
   async function handleSubmit() {
-    if (!userId || !title) return;
-    const roadmap = await createRoadmap(supabase, userId, { title, source: 'manual' });
-    await Promise.all(
-      draftMilestones.map((m, index) =>
-        createMilestone(supabase, { roadmap_id: roadmap.id, title: m.title, due_date: m.due_date, order_index: index })
-      )
-    );
-    router.replace(`/roadmap/${roadmap.id}`);
+    if (!userId || !title || submitting) return;
+    setSubmitting(true);
+    try {
+      const roadmap = await createRoadmap(supabase, userId, { title, source: 'manual' });
+      await Promise.all(
+        draftMilestones.map((m, index) =>
+          createMilestone(supabase, { roadmap_id: roadmap.id, title: m.title, due_date: m.due_date, order_index: index })
+        )
+      );
+      router.replace(`/roadmap/${roadmap.id}`);
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   async function handleAiSubmit() {
-    if (!userId || !title) return;
+    if (!userId || !title || submitting) return;
+    setSubmitting(true);
     try {
       const response = await fetch(`${BACKEND_URL}/generate-roadmap`, {
         method: 'POST',
@@ -60,20 +67,33 @@ export default function CreateRoadmapPage() {
     } catch {
       setAiError('AI 생성에 실패했어요. 직접 입력으로 만들어주세요.');
       setMode('manual');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function handleFormSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (mode === 'ai') {
+      handleAiSubmit();
+    } else {
+      handleSubmit();
     }
   }
 
   return (
-    <div className="mx-auto max-w-xl space-y-4 p-6">
+    <form className="mx-auto max-w-xl space-y-4 p-6" onSubmit={handleFormSubmit}>
       <h1 className="text-xl font-bold">새 로드맵 만들기</h1>
       <div className="flex gap-2">
         <button
+          type="button"
           className={`flex-1 rounded-lg p-3 font-semibold ${mode === 'ai' ? 'bg-orange-500 text-white' : 'border'}`}
           onClick={() => setMode('ai')}
         >
           AI가 만들어줘
         </button>
         <button
+          type="button"
           className={`flex-1 rounded-lg p-3 font-semibold ${mode === 'manual' ? 'bg-orange-500 text-white' : 'border'}`}
           onClick={() => setMode('manual')}
         >
@@ -90,7 +110,11 @@ export default function CreateRoadmapPage() {
             value={aiDescription}
             onChange={(e) => setAiDescription(e.target.value)}
           />
-          <button className="w-full rounded-lg bg-orange-500 p-3 font-semibold text-white" onClick={handleAiSubmit}>
+          <button
+            type="submit"
+            className="w-full rounded-lg bg-orange-500 p-3 font-semibold text-white disabled:opacity-50"
+            disabled={!title || submitting}
+          >
             AI로 로드맵 만들기
           </button>
         </div>
@@ -117,7 +141,12 @@ export default function CreateRoadmapPage() {
                 value={milestoneDue}
                 onChange={(e) => setMilestoneDue(e.target.value)}
               />
-              <button className="rounded-lg border px-4 py-2" onClick={addDraftMilestone}>
+              <button
+                type="button"
+                className="rounded-lg border px-4 py-2 disabled:opacity-50"
+                onClick={addDraftMilestone}
+                disabled={!milestoneTitle || !milestoneDue}
+              >
                 + 추가
               </button>
             </div>
@@ -125,18 +154,22 @@ export default function CreateRoadmapPage() {
               {draftMilestones.map((m, index) => (
                 <li key={`${m.title}-${index}`} className="flex items-center justify-between gap-2">
                   <span>- {m.title} ({m.due_date})</span>
-                  <button className="text-xs text-red-600" onClick={() => removeDraftMilestone(index)}>
+                  <button type="button" className="text-xs text-red-600" onClick={() => removeDraftMilestone(index)}>
                     삭제
                   </button>
                 </li>
               ))}
             </ul>
-            <button className="mt-3 w-full rounded-lg bg-orange-500 p-3 font-semibold text-white" onClick={handleSubmit}>
+            <button
+              type="submit"
+              className="mt-3 w-full rounded-lg bg-orange-500 p-3 font-semibold text-white disabled:opacity-50"
+              disabled={!title || submitting}
+            >
               로드맵 만들기
             </button>
           </div>
         </div>
       )}
-    </div>
+    </form>
   );
 }

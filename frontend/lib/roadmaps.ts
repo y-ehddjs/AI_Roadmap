@@ -56,6 +56,12 @@ export async function setRoadmapPublic(client: SupabaseClient, roadmapId: string
   if (error) throw error;
 }
 
+// 완료 처리됐던 로드맵에 마일스톤을 새로 추가하면 다시 진행 중으로 되돌린다.
+export async function reactivateRoadmap(client: SupabaseClient, roadmapId: string): Promise<void> {
+  const { error } = await client.from('roadmaps').update({ status: 'active' }).eq('id', roadmapId);
+  if (error) throw error;
+}
+
 // 공개 화면 전용 — description 등 개인 정보가 담긴 컬럼은 아예 select하지
 // 않는다. UI가 안 그린다고 안전한 게 아니라, 네트워크 응답에 애초에 안
 // 실려야 안전하다. user_id는 소유자 표시/팔로우 버튼에 필요해서 포함한다.

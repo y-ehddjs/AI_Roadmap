@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { supabase } from '../../../lib/supabase';
 import { useRequireAuth } from '../../../lib/useAuth';
-import { updateMilestone, deleteMilestone } from '../../../lib/milestones';
+import { getMilestone, updateMilestone, deleteMilestone } from '../../../lib/milestones';
 import { completeRoadmapIfAllDone } from '../../../lib/roadmaps';
 import { recordCheckin } from '../../../lib/checkins';
 import type { Milestone } from '../../../types/models';
@@ -15,19 +15,26 @@ export default function MilestoneDetailPage() {
   const [milestone, setMilestone] = useState<Milestone | null>(null);
   const [description, setDescription] = useState('');
   const [dueDate, setDueDate] = useState('');
+  const [notFound, setNotFound] = useState(false);
 
   useEffect(() => {
     if (!userId || !id) return;
-    async function load() {
-      const { data } = await supabase.from('milestones').select('*').eq('id', id).single();
-      const row = data as Milestone;
-      setMilestone(row);
-      setDescription(row?.description ?? '');
-      setDueDate(row?.due_date ?? '');
-    }
-    load();
+    getMilestone(supabase, id)
+      .then((row) => {
+        setMilestone(row);
+        setDescription(row.description ?? '');
+        setDueDate(row.due_date ?? '');
+      })
+      .catch(() => setNotFound(true));
   }, [userId, id]);
 
+  if (notFound) {
+    return (
+      <div className="mx-auto max-w-md p-6 text-center text-gray-600">
+        찾을 수 없거나 접근 권한이 없는 마일스톤이에요.
+      </div>
+    );
+  }
   if (!milestone) return null;
 
   async function toggleDone(checked: boolean) {
@@ -59,6 +66,9 @@ export default function MilestoneDetailPage() {
     if (!confirm('이 마일스톤을 삭제할까요?')) return;
     const roadmapId = milestone.roadmap_id;
     await deleteMilestone(supabase, milestone.id);
+    // 미완료 마일스톤을 지워서 남은 마일스톤이 전부 완료 상태가 될 수도 있으니,
+    // 체크 완료 때와 마찬가지로 로드맵 자동 완료 여부를 다시 확인한다.
+    await completeRoadmapIfAllDone(supabase, roadmapId);
     router.replace(`/roadmap/${roadmapId}`);
   }
 

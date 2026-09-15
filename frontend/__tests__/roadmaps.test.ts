@@ -1,4 +1,4 @@
-import { createRoadmap, listRoadmaps, getRoadmap, deleteRoadmap, completeRoadmapIfAllDone, setRoadmapPublic, getPublicRoadmap } from '../lib/roadmaps';
+import { createRoadmap, listRoadmaps, getRoadmap, deleteRoadmap, completeRoadmapIfAllDone, setRoadmapPublic, getPublicRoadmap, reactivateRoadmap } from '../lib/roadmaps';
 import { makeFakeClient } from '../test-utils/fakeSupabaseClient';
 
 test('createRoadmap inserts and returns the created row', async () => {
@@ -79,4 +79,15 @@ test('getPublicRoadmap returns id, title, and user_id', async () => {
   const client = makeFakeClient([{ data: row, error: null }]);
   const result = await getPublicRoadmap(client, 'r1');
   expect(result).toEqual(row);
+});
+
+test('reactivateRoadmap sets status back to active', async () => {
+  const client = makeFakeClient([{ data: null, error: null }]);
+  await reactivateRoadmap(client, 'r1');
+  expect(client.from).toHaveBeenCalledWith('roadmaps');
+});
+
+test('reactivateRoadmap throws when supabase returns an error', async () => {
+  const client = makeFakeClient([{ data: null, error: new Error('update failed') }]);
+  await expect(reactivateRoadmap(client, 'r1')).rejects.toThrow('update failed');
 });

@@ -37,6 +37,12 @@ export async function listMilestones(client: SupabaseClient, roadmapId: string):
   return (data ?? []) as Milestone[];
 }
 
+export async function getMilestone(client: SupabaseClient, milestoneId: string): Promise<Milestone> {
+  const { data, error } = await client.from('milestones').select('*').eq('id', milestoneId).single();
+  if (error) throw error;
+  return data as Milestone;
+}
+
 export async function updateMilestone(
   client: SupabaseClient,
   milestoneId: string,

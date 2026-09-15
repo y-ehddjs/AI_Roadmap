@@ -1,4 +1,4 @@
-import { createMilestone, listMilestones, updateMilestone, deleteMilestone, listPublicMilestones } from '../lib/milestones';
+import { createMilestone, listMilestones, updateMilestone, deleteMilestone, listPublicMilestones, getMilestone } from '../lib/milestones';
 import { makeFakeClient } from '../test-utils/fakeSupabaseClient';
 
 test('createMilestone inserts and returns the created row', async () => {
@@ -43,4 +43,16 @@ test('listPublicMilestones returns only the public-safe columns', async () => {
   const client = makeFakeClient([{ data: rows, error: null }]);
   const result = await listPublicMilestones(client, 'r1');
   expect(result).toEqual(rows);
+});
+
+test('getMilestone returns a single row', async () => {
+  const row = { id: 'm1', roadmap_id: 'r1', title: '1km 완주', due_date: '2026-10-01', order_index: 0, status: 'pending' };
+  const client = makeFakeClient([{ data: row, error: null }]);
+  const result = await getMilestone(client, 'm1');
+  expect(result).toEqual(row);
+});
+
+test('getMilestone throws when supabase returns an error (not found or RLS-blocked)', async () => {
+  const client = makeFakeClient([{ data: null, error: new Error('not found') }]);
+  await expect(getMilestone(client, 'm1')).rejects.toThrow('not found');
 });

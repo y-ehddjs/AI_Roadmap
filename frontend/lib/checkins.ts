@@ -28,3 +28,15 @@ export async function getTodayStreak(client: SupabaseClient, userId: string, tod
   if (error) throw error;
   return computeStreak((data ?? []).map((row: { checkin_date: string }) => row.checkin_date), today);
 }
+
+export async function hasCheckedInToday(client: SupabaseClient, userId: string, today: Date): Promise<boolean> {
+  const todayStr = today.toISOString().slice(0, 10);
+  const { data, error } = await client
+    .from('habit_checkins')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('checkin_date', todayStr)
+    .maybeSingle();
+  if (error) throw error;
+  return data !== null;
+}

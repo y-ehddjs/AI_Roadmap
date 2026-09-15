@@ -6,7 +6,7 @@ import { useRequireAuth } from '../../lib/useAuth';
 import { listRoadmaps } from '../../lib/roadmaps';
 import { listMilestones } from '../../lib/milestones';
 import { calculateProgress, milestoneStatus } from '../../lib/progress';
-import { recordCheckin, getTodayStreak } from '../../lib/checkins';
+import { recordCheckin, getTodayStreak, hasCheckedInToday } from '../../lib/checkins';
 import type { Roadmap, Milestone } from '../../types/models';
 
 interface RoadmapRow {
@@ -20,18 +20,35 @@ export default function HomePage() {
   const userId = useRequireAuth();
   const [rows, setRows] = useState<RoadmapRow[]>([]);
   const [streak, setStreak] = useState(0);
+  const [checkedInToday, setCheckedInToday] = useState(false);
+  const [checkinInFlight, setCheckinInFlight] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!userId) return;
     async function loadStreak() {
-      setStreak(await getTodayStreak(supabase, userId as string, new Date()));
+      const today = new Date();
+      const [currentStreak, alreadyCheckedIn] = await Promise.all([
+        getTodayStreak(supabase, userId as string, today),
+        hasCheckedInToday(supabase, userId as string, today),
+      ]);
+      setStreak(currentStreak);
+      setCheckedInToday(alreadyCheckedIn);
     }
-    loadStreak();
+    loadStreak().catch(() => setError('스트릭 정보를 불러오지 못했어요.'));
   }, [userId]);
 
   async function handleCheckin() {
-    if (!userId) return;
-    setStreak(await recordCheckin(supabase, userId, new Date()));
+    if (!userId || checkedInToday || checkinInFlight) return;
+    setCheckinInFlight(true);
+    try {
+      setStreak(await recordCheckin(supabase, userId, new Date()));
+      setCheckedInToday(true);
+    } catch {
+      setError('체크인에 실패했어요. 다시 시도해주세요.');
+    } finally {
+      setCheckinInFlight(false);
+    }
   }
 
   useEffect(() => {
@@ -57,7 +74,7 @@ export default function HomePage() {
       );
       setRows(withProgress);
     }
-    load();
+    load().catch(() => setError('로드맵 목록을 불러오지 못했어요.'));
   }, [userId]);
 
   return (
@@ -66,11 +83,16 @@ export default function HomePage() {
         <h1 className="text-2xl font-bold">내 목표</h1>
         <div className="flex items-center gap-3">
           <span className="rounded-full bg-orange-100 px-3 py-1 text-sm font-semibold text-orange-700">{streak}일 연속</span>
-          <button className="rounded-lg border px-3 py-1 text-sm" onClick={handleCheckin}>
-            오늘 체크인
+          <button
+            className="rounded-lg border px-3 py-1 text-sm disabled:opacity-50"
+            onClick={handleCheckin}
+            disabled={checkedInToday || checkinInFlight}
+          >
+            {checkedInToday ? '오늘 체크인 완료' : '오늘 체크인'}
           </button>
         </div>
       </div>
+      {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
       <p className="mb-4 text-sm text-gray-500">{rows.length}개 진행 중 (완료된 로드맵은 대시보드에서 확인)</p>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         {rows.map((row) => (

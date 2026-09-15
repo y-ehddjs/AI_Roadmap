@@ -1,10 +1,10 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { supabase } from '../../../lib/supabase';
 import { useRequireAuth } from '../../../lib/useAuth';
-import { getRoadmap, deleteRoadmap, setRoadmapPublic } from '../../../lib/roadmaps';
+import { getRoadmap, deleteRoadmap, setRoadmapPublic, reactivateRoadmap } from '../../../lib/roadmaps';
 import { listMilestones, createMilestone } from '../../../lib/milestones';
 import { calculateProgress, milestoneStatus } from '../../../lib/progress';
 import { computeNodePositions } from '../../../lib/timeline';
@@ -18,6 +18,7 @@ export default function RoadmapDetailPage() {
   const [milestones, setMilestones] = useState<Milestone[]>([]);
   const [newMilestoneTitle, setNewMilestoneTitle] = useState('');
   const [newMilestoneDue, setNewMilestoneDue] = useState('');
+  const [addingMilestone, setAddingMilestone] = useState(false);
 
   async function load() {
     if (!id) return;
@@ -31,23 +32,28 @@ export default function RoadmapDetailPage() {
   }, [userId, id]);
 
   async function handleAddMilestone() {
-    if (!id || !newMilestoneTitle || !newMilestoneDue) return;
-    // order_index는 그냥 끝 번호만 매기면 된다 - listMilestones가 due_date로
-    // 정렬해서 돌려주므로, 이 마일스톤의 마감일이 기존 것보다 이르더라도
-    // 타임라인에서는 알아서 올바른 위치에 보인다.
-    await createMilestone(supabase, {
-      roadmap_id: id,
-      title: newMilestoneTitle,
-      due_date: newMilestoneDue,
-      order_index: milestones.length,
-    });
-    // 완료 처리됐던 로드맵에 마일스톤을 새로 추가하면 다시 진행 중으로 되돌린다
-    if (roadmap?.status === 'completed') {
-      await supabase.from('roadmaps').update({ status: 'active' }).eq('id', id);
+    if (!id || !newMilestoneTitle || !newMilestoneDue || addingMilestone) return;
+    setAddingMilestone(true);
+    try {
+      // order_index는 그냥 끝 번호만 매기면 된다 - listMilestones가 due_date로
+      // 정렬해서 돌려주므로, 이 마일스톤의 마감일이 기존 것보다 이르더라도
+      // 타임라인에서는 알아서 올바른 위치에 보인다.
+      await createMilestone(supabase, {
+        roadmap_id: id,
+        title: newMilestoneTitle,
+        due_date: newMilestoneDue,
+        order_index: milestones.length,
+      });
+      // 완료 처리됐던 로드맵에 마일스톤을 새로 추가하면 다시 진행 중으로 되돌린다
+      if (roadmap?.status === 'completed') {
+        await reactivateRoadmap(supabase, id);
+      }
+      setNewMilestoneTitle('');
+      setNewMilestoneDue('');
+      await load();
+    } finally {
+      setAddingMilestone(false);
     }
-    setNewMilestoneTitle('');
-    setNewMilestoneDue('');
-    await load();
   }
 
   async function handleDeleteRoadmap() {
@@ -58,6 +64,7 @@ export default function RoadmapDetailPage() {
   }
 
   const [linkCopied, setLinkCopied] = useState(false);
+  const linkInputRef = useRef<HTMLInputElement>(null);
 
   async function handleTogglePublic(checked: boolean) {
     if (!id) return;
@@ -67,9 +74,15 @@ export default function RoadmapDetailPage() {
 
   async function handleCopyLink() {
     if (!id) return;
-    await navigator.clipboard.writeText(`${window.location.origin}/r/${id}`);
-    setLinkCopied(true);
-    setTimeout(() => setLinkCopied(false), 2000);
+    try {
+      await navigator.clipboard.writeText(`${window.location.origin}/r/${id}`);
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2000);
+    } catch {
+      // 클립보드 접근이 브라우저 정책으로 막혔을 수 있다 - 조용히 실패하는
+      // 대신 사용자가 직접 복사할 수 있게 입력창에 포커스를 주고 텍스트를 선택한다.
+      linkInputRef.current?.focus();
+    }
   }
 
   if (!roadmap) return null;
@@ -97,6 +110,7 @@ export default function RoadmapDetailPage() {
             </div>
             <div className="mt-2 flex items-center gap-2">
               <input
+                ref={linkInputRef}
                 readOnly
                 value={`${typeof window !== 'undefined' ? window.location.origin : ''}/r/${id}`}
                 className="flex-1 rounded-lg border bg-gray-50 p-2 text-xs text-gray-600"
@@ -135,7 +149,11 @@ export default function RoadmapDetailPage() {
             value={newMilestoneDue}
             onChange={(e) => setNewMilestoneDue(e.target.value)}
           />
-          <button className="rounded-lg border px-4 py-2" onClick={handleAddMilestone}>
+          <button
+            className="rounded-lg border px-4 py-2 disabled:opacity-50"
+            onClick={handleAddMilestone}
+            disabled={!newMilestoneTitle || !newMilestoneDue || addingMilestone}
+          >
             + 추가
           </button>
         </div>

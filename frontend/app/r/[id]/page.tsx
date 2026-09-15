@@ -27,6 +27,9 @@ export default function PublicRoadmapPage() {
   const [following, setFollowing] = useState(false);
   const [comments, setComments] = useState<Comment[]>([]);
   const [commentBody, setCommentBody] = useState('');
+  const [heartInFlight, setHeartInFlight] = useState(false);
+  const [followInFlight, setFollowInFlight] = useState(false);
+  const [commentInFlight, setCommentInFlight] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -47,43 +50,73 @@ export default function PublicRoadmapPage() {
   useEffect(() => {
     if (!roadmap) return;
     getReactionCount(supabase, roadmap.id).then(setHeartCount);
-    if (userId) hasReacted(supabase, roadmap.id, userId).then(setReacted);
     listComments(supabase, roadmap.id).then(setComments);
-  }, [roadmap, userId]);
+  }, [roadmap]);
 
   useEffect(() => {
-    if (!roadmap || !userId || userId === roadmap.user_id) return;
-    isFollowing(supabase, userId, roadmap.user_id).then(setFollowing);
+    if (!roadmap || !userId) return;
+    hasReacted(supabase, roadmap.id, userId).then(setReacted);
+    if (userId !== roadmap.user_id) {
+      isFollowing(supabase, userId, roadmap.user_id).then(setFollowing);
+    }
   }, [roadmap, userId]);
 
   async function handleHeart() {
-    if (!roadmap || !userId) return;
-    const nowReacted = await toggleReaction(supabase, roadmap.id, userId);
-    setReacted(nowReacted);
-    setHeartCount((prev) => prev + (nowReacted ? 1 : -1));
+    if (!roadmap || !userId || heartInFlight) return;
+    setHeartInFlight(true);
+    try {
+      const nowReacted = await toggleReaction(supabase, roadmap.id, userId);
+      setReacted(nowReacted);
+      setHeartCount((prev) => prev + (nowReacted ? 1 : -1));
+    } catch {
+      // 연타로 두 요청이 동시에 나가면 유니크 제약 충돌(409) 등으로 실패할 수
+      // 있다 - 화면 상태는 이미 서버와 어긋났을 수 있으니 실제 값으로 다시 맞춘다.
+      getReactionCount(supabase, roadmap.id).then(setHeartCount);
+      hasReacted(supabase, roadmap.id, userId).then(setReacted);
+    } finally {
+      setHeartInFlight(false);
+    }
   }
 
   async function handleToggleFollow() {
-    if (!roadmap || !userId) return;
-    if (following) {
-      await unfollow(supabase, userId, roadmap.user_id);
-      setFollowing(false);
-    } else {
-      await follow(supabase, userId, roadmap.user_id);
-      setFollowing(true);
+    if (!roadmap || !userId || followInFlight) return;
+    setFollowInFlight(true);
+    try {
+      if (following) {
+        await unfollow(supabase, userId, roadmap.user_id);
+        setFollowing(false);
+      } else {
+        await follow(supabase, userId, roadmap.user_id);
+        setFollowing(true);
+      }
+    } catch {
+      isFollowing(supabase, userId, roadmap.user_id).then(setFollowing);
+    } finally {
+      setFollowInFlight(false);
     }
   }
 
   async function handleAddComment() {
-    if (!roadmap || !userId || !commentBody.trim()) return;
-    const created = await addComment(supabase, roadmap.id, userId, commentBody.trim());
-    setComments((prev) => [...prev, created]);
-    setCommentBody('');
+    if (!roadmap || !userId || !commentBody.trim() || commentInFlight) return;
+    setCommentInFlight(true);
+    try {
+      const created = await addComment(supabase, roadmap.id, userId, commentBody.trim());
+      setComments((prev) => [...prev, created]);
+      setCommentBody('');
+    } catch {
+      // 등록 실패 시 입력한 내용은 그대로 남겨서 다시 시도할 수 있게 한다.
+    } finally {
+      setCommentInFlight(false);
+    }
   }
 
   async function handleDeleteComment(commentId: string) {
-    await deleteComment(supabase, commentId);
-    setComments((prev) => prev.filter((c) => c.id !== commentId));
+    try {
+      await deleteComment(supabase, commentId);
+      setComments((prev) => prev.filter((c) => c.id !== commentId));
+    } catch {
+      // 삭제 실패(네트워크 오류 등) 시 목록은 그대로 두고 사용자가 다시 시도할 수 있게 한다.
+    }
   }
 
   if (notFound) {
@@ -108,10 +141,11 @@ export default function PublicRoadmapPage() {
         <p className="text-sm text-gray-600">{ownerName}</p>
         {!isOwner && userId && (
           <button
-            className={`rounded-full border px-3 py-1 text-xs ${
+            className={`rounded-full border px-3 py-1 text-xs disabled:opacity-50 ${
               following ? 'bg-gray-100 text-gray-700' : 'bg-orange-500 text-white'
             }`}
             onClick={handleToggleFollow}
+            disabled={followInFlight}
           >
             {following ? '팔로잉' : '팔로우'}
           </button>
@@ -121,11 +155,11 @@ export default function PublicRoadmapPage() {
         전체 진행률 {progress.percent}% ({progress.completedCount}/{progress.totalCount})
       </p>
       <button
-        className={`mt-2 flex items-center gap-1 rounded-full border px-3 py-1.5 text-sm ${
+        className={`mt-2 flex items-center gap-1 rounded-full border px-3 py-1.5 text-sm disabled:opacity-60 ${
           reacted ? 'bg-rose-500 text-white' : 'bg-white text-gray-600'
-        } ${!userId ? 'opacity-60' : ''}`}
+        }`}
         onClick={handleHeart}
-        disabled={!userId}
+        disabled={!userId || heartInFlight}
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill={reacted ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2">
           <path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8z" />
@@ -159,6 +193,7 @@ export default function PublicRoadmapPage() {
 
       <div className="mt-6 border-t pt-4">
         <h2 className="text-sm font-semibold">댓글 {comments.length}</h2>
+        {comments.length === 0 && <p className="mt-2 text-sm text-gray-500">아직 댓글이 없어요.</p>}
         <ul className="mt-2 space-y-2">
           {comments.map((comment) => (
             <li key={comment.id} className="flex items-center justify-between gap-2 rounded-lg bg-gray-50 p-2 text-sm">
@@ -179,7 +214,11 @@ export default function PublicRoadmapPage() {
               value={commentBody}
               onChange={(e) => setCommentBody(e.target.value)}
             />
-            <button className="rounded-lg bg-orange-500 px-3 py-2 text-sm text-white" onClick={handleAddComment}>
+            <button
+              className="rounded-lg bg-orange-500 px-3 py-2 text-sm text-white disabled:opacity-50"
+              onClick={handleAddComment}
+              disabled={!commentBody.trim() || commentInFlight}
+            >
               등록
             </button>
           </div>

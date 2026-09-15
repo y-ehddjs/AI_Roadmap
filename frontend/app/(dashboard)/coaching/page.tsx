@@ -9,15 +9,32 @@ export default function CoachingInboxPage() {
   const [messages, setMessages] = useState<CoachingMessageWithRoadmap[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
+
+  async function load() {
+    if (!userId) return;
+    setMessages(await listMessages(supabase, userId as string));
+    setLoaded(true);
+  }
 
   useEffect(() => {
-    if (!userId) return;
-    async function load() {
-      setMessages(await listMessages(supabase, userId as string));
-      setLoaded(true);
-    }
     load().catch(() => setError('코칭 메시지를 불러오지 못했어요.'));
   }, [userId]);
+
+  async function handleCheckNow() {
+    if (checking) return;
+    setChecking(true);
+    setError(null);
+    try {
+      const response = await fetch('/api/check-coaching', { method: 'POST' });
+      if (!response.ok) throw new Error('check-coaching failed');
+      await load();
+    } catch {
+      setError('코칭 확인에 실패했어요. 다시 시도해주세요.');
+    } finally {
+      setChecking(false);
+    }
+  }
 
   async function handleOpen(message: CoachingMessageWithRoadmap) {
     if (message.read_at) return;
@@ -31,7 +48,16 @@ export default function CoachingInboxPage() {
 
   return (
     <div className="mx-auto max-w-2xl p-6">
-      <h1 className="font-display text-sm text-neon-purple drop-shadow-[0_0_8px_rgba(185,139,255,0.5)]">AI 코칭</h1>
+      <div className="flex items-center justify-between gap-2">
+        <h1 className="font-display text-sm text-neon-purple drop-shadow-[0_0_8px_rgba(185,139,255,0.5)]">AI 코칭</h1>
+        <button
+          className="shrink-0 rounded-lg border-2 border-neon-purple bg-panel px-3 py-1.5 text-[10px] font-bold text-neon-purple shadow-[2px_2px_0_var(--color-border)] disabled:opacity-50"
+          onClick={handleCheckNow}
+          disabled={checking}
+        >
+          {checking ? '확인 중...' : '지금 확인하기'}
+        </button>
+      </div>
       {error && <p className="mt-2 text-xs text-neon-pink">{error}</p>}
       {loaded && messages.length === 0 && <p className="mt-4 text-xs text-ink-dim">아직 코칭 메시지가 없어요.</p>}
       <ul className="mt-4 flex flex-col gap-2.5">

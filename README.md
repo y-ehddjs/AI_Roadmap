@@ -2,8 +2,8 @@
 
 목표(운동, 자격증, 새 언어 학습 등)를 세우고 마일스톤 단위로 쪼갠 로드맵을 경로형
 타임라인으로 관리하는 반응형 웹 앱. AI(Gemini)가 로드맵을 제안하거나 지연을 감지해
-코칭 메시지를 보내고, 로드맵을 공개로 공유해 다른 사용자의 하이파이브를 받을 수도
-있다.
+코칭 메시지를 보내고, 로드맵을 공개로 공유해 다른 사용자에게 하트와 댓글을 받거나
+서로 팔로우할 수도 있다.
 
 ## 구조 (모노레포)
 
@@ -76,5 +76,6 @@ cd backend && source .venv/bin/activate && pytest
 
 ## 문서
 
+- API 명세서: [`docs/API.md`](docs/API.md)
 - 설계 문서: `docs/superpowers/specs/`
-- 구현 계획(태스크별 작업 내역 + API 엔드포인트 명세): `docs/superpowers/plans/`
+- 구현 계획(태스크별 작업 내역): `docs/superpowers/plans/`

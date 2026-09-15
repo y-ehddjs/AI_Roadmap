@@ -31,6 +31,10 @@ export default function CreateRoadmapPage() {
     setMilestoneDue('');
   }
 
+  function removeDraftMilestone(index: number) {
+    setDraftMilestones(draftMilestones.filter((_, i) => i !== index));
+  }
+
   async function handleSubmit() {
     if (!userId || !title) return;
     const roadmap = await createRoadmap(supabase, userId, { title, source: 'manual' });
@@ -119,7 +123,12 @@ export default function CreateRoadmapPage() {
             </div>
             <ul className="mt-3 space-y-1 text-sm text-gray-700">
               {draftMilestones.map((m, index) => (
-                <li key={`${m.title}-${index}`}>- {m.title} ({m.due_date})</li>
+                <li key={`${m.title}-${index}`} className="flex items-center justify-between gap-2">
+                  <span>- {m.title} ({m.due_date})</span>
+                  <button className="text-xs text-red-600" onClick={() => removeDraftMilestone(index)}>
+                    삭제
+                  </button>
+                </li>
               ))}
             </ul>
             <button className="mt-3 w-full rounded-lg bg-orange-500 p-3 font-semibold text-white" onClick={handleSubmit}>

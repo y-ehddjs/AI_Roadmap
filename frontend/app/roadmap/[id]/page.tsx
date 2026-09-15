@@ -7,7 +7,7 @@ import { useRequireAuth } from '../../../lib/useAuth';
 import { getRoadmap, deleteRoadmap, setRoadmapPublic, reactivateRoadmap } from '../../../lib/roadmaps';
 import { listMilestones, createMilestone } from '../../../lib/milestones';
 import { calculateProgress, milestoneStatus } from '../../../lib/progress';
-import { computeNodePositions } from '../../../lib/timeline';
+import { computeNodePositions, computeTimelinePath } from '../../../lib/timeline';
 import type { Roadmap, Milestone } from '../../../types/models';
 
 export default function RoadmapDetailPage() {
@@ -218,6 +218,22 @@ export default function RoadmapDetailPage() {
       </ul>
 
       <div className="relative mt-6 hidden sm:block" style={{ height: pathHeight }}>
+        <svg
+          className="absolute inset-0 h-full w-full"
+          viewBox={`0 0 100 ${pathHeight}`}
+          preserveAspectRatio="none"
+          style={{ zIndex: 0 }}
+        >
+          <path
+            d={computeTimelinePath(positions)}
+            fill="none"
+            stroke="var(--color-neon-pink)"
+            strokeOpacity={0.4}
+            strokeWidth={1}
+            strokeLinecap="round"
+            strokeDasharray="0.6 3.5"
+          />
+        </svg>
         {milestones.map((milestone, index) => {
           const pos = positions[index];
           const status = milestoneStatus(milestone, now);
@@ -225,7 +241,7 @@ export default function RoadmapDetailPage() {
             <Link
               key={milestone.id}
               href={`/milestone/${milestone.id}`}
-              className="absolute flex -translate-x-1/2 flex-col items-center gap-1 text-center"
+              className="absolute z-10 flex -translate-x-1/2 flex-col items-center gap-1 text-center"
               style={{ left: `${pos.xPercent * 100}%`, top: pos.y }}
             >
               <div

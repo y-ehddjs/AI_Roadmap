@@ -5,7 +5,7 @@ import { supabase } from '../../../lib/supabase';
 import { getPublicRoadmap } from '../../../lib/roadmaps';
 import { listPublicMilestones } from '../../../lib/milestones';
 import { calculateProgress, milestoneStatus } from '../../../lib/progress';
-import { computeNodePositions } from '../../../lib/timeline';
+import { computeNodePositions, computeTimelinePath } from '../../../lib/timeline';
 import { hasReacted, getReactionCount, toggleReaction } from '../../../lib/reactions';
 import { getProfile } from '../../../lib/profiles';
 import { isFollowing, follow, unfollow } from '../../../lib/follows';
@@ -190,13 +190,24 @@ export default function PublicRoadmapPage() {
       </button>
 
       <div className="relative mt-6" style={{ height: pathHeight }}>
+        <svg className="absolute inset-0 h-full w-full" viewBox={`0 0 100 ${pathHeight}`} preserveAspectRatio="none" style={{ zIndex: 0 }}>
+          <path
+            d={computeTimelinePath(positions)}
+            fill="none"
+            stroke="var(--color-neon-pink)"
+            strokeOpacity={0.4}
+            strokeWidth={1}
+            strokeLinecap="round"
+            strokeDasharray="0.6 3.5"
+          />
+        </svg>
         {milestones.map((milestone, index) => {
           const pos = positions[index];
           const status = milestoneStatus(milestone, now);
           return (
             <div
               key={milestone.id}
-              className="absolute flex -translate-x-1/2 flex-col items-center gap-1 text-center"
+              className="absolute z-10 flex -translate-x-1/2 flex-col items-center gap-1 text-center"
               style={{ left: `${pos.xPercent * 100}%`, top: pos.y }}
             >
               <div

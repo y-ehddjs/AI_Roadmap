@@ -1,1 +1,30 @@
 @import "tailwindcss";
+
+@theme {
+  --font-display: "Press Start 2P", "Space Mono", monospace;
+  --font-mono: "Space Mono", monospace;
+
+  --color-bg-top: #170b2e;
+  --color-bg-bottom: #2b0f3d;
+  --color-panel: #1c0f33;
+  --color-field: #120a24;
+  --color-border: #0a0414;
+  --color-ink: #f2e9ff;
+  --color-ink-dim: #9a86c2;
+  --color-neon-pink: #ff2e8f;
+  --color-neon-cyan: #2ee6ff;
+  --color-neon-yellow: #ffe93f;
+  --color-neon-purple: #b98bff;
+  --color-neon-red: #ff3b3b;
+}
+
+body {
+  min-height: 100vh;
+  background: linear-gradient(180deg, var(--color-bg-top) 0%, var(--color-bg-bottom) 55%, #120821 100%);
+  color: var(--color-ink);
+  font-family: var(--font-mono);
+}
+
+::placeholder {
+  color: var(--color-ink-dim);
+}

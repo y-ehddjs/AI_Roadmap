@@ -121,7 +121,7 @@ export default function PublicRoadmapPage() {
 
   if (notFound) {
     return (
-      <div className="mx-auto max-w-md p-6 text-center text-gray-600">
+      <div className="mx-auto max-w-md p-6 text-center text-ink-dim">
         찾을 수 없거나 비공개인 로드맵이에요.
       </div>
     );
@@ -136,13 +136,24 @@ export default function PublicRoadmapPage() {
 
   return (
     <div className="mx-auto max-w-2xl p-6">
-      <h1 className="text-xl font-bold">{roadmap.title}</h1>
-      <div className="mt-1 flex items-center justify-between">
-        <p className="text-sm text-gray-600">{ownerName}</p>
+      <div className="flex flex-col items-center gap-2">
+        <span className="rounded-full border-2 border-neon-purple px-2.5 py-1 text-[9px] font-bold tracking-wide text-neon-purple">
+          공개 로드맵 · 읽기 전용
+        </span>
+        <h1 className="text-center text-sm text-ink">{roadmap.title}</h1>
+      </div>
+
+      <div className="mt-3 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="flex h-6 w-6 items-center justify-center rounded-md border-2 border-neon-purple bg-panel text-[10px] font-bold text-neon-purple">
+            {ownerName.slice(0, 1)}
+          </span>
+          <span className="text-xs text-ink-dim">{ownerName}</span>
+        </div>
         {!isOwner && userId && (
           <button
-            className={`rounded-full border px-3 py-1 text-xs disabled:opacity-50 ${
-              following ? 'bg-gray-100 text-gray-700' : 'bg-orange-500 text-white'
+            className={`rounded-full border-2 border-border px-3 py-1 text-[10px] font-bold disabled:opacity-50 ${
+              following ? 'bg-panel text-ink-dim' : 'bg-neon-pink text-border shadow-[2px_2px_0_var(--color-border)]'
             }`}
             onClick={handleToggleFollow}
             disabled={followInFlight}
@@ -151,17 +162,28 @@ export default function PublicRoadmapPage() {
           </button>
         )}
       </div>
-      <p className="mt-2 text-sm text-gray-600">
-        전체 진행률 {progress.percent}% ({progress.completedCount}/{progress.totalCount})
-      </p>
+
+      <div className="mt-2.5 rounded-2xl border-2 border-border bg-panel p-3.5 shadow-[4px_4px_0_var(--color-border)]">
+        <div className="flex justify-between text-[10px] text-ink-dim">
+          <span>전체 진행률</span>
+          <span className="font-bold text-neon-cyan">{progress.percent}%</span>
+        </div>
+        <div className="mt-1.5 h-2.5 overflow-hidden rounded-full border-2 border-border bg-field">
+          <div className="h-full bg-neon-cyan shadow-[0_0_8px_var(--color-neon-cyan)]" style={{ width: `${progress.percent}%` }} />
+        </div>
+        <span className="mt-1.5 block text-[9px] text-ink-dim">
+          {progress.totalCount}개 마일스톤 중 {progress.completedCount}개 완료
+        </span>
+      </div>
+
       <button
-        className={`mt-2 flex items-center gap-1 rounded-full border px-3 py-1.5 text-sm disabled:opacity-60 ${
-          reacted ? 'bg-rose-500 text-white' : 'bg-white text-gray-600'
+        className={`mt-2.5 flex items-center gap-1.5 rounded-full border-2 border-neon-pink px-3 py-2 text-xs font-bold shadow-[3px_3px_0_var(--color-border)] disabled:opacity-60 ${
+          reacted ? 'bg-neon-pink text-border' : 'bg-panel text-ink'
         }`}
         onClick={handleHeart}
         disabled={!userId || heartInFlight}
       >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill={reacted ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill={reacted ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2">
           <path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8z" />
         </svg>
         {heartCount}
@@ -178,44 +200,65 @@ export default function PublicRoadmapPage() {
               style={{ left: `${pos.xPercent * 100}%`, top: pos.y }}
             >
               <div
-                className={`flex h-14 w-14 items-center justify-center rounded-full font-semibold text-white ${
-                  status === 'done' ? 'bg-green-500' : status === 'overdue' ? 'bg-red-500' : 'bg-gray-200 !text-gray-700'
+                className={`flex h-14 w-14 items-center justify-center rounded-full border-2 border-border font-display text-xs shadow-[3px_3px_0_var(--color-border)] ${
+                  status === 'done'
+                    ? 'bg-panel text-neon-cyan shadow-[3px_3px_0_var(--color-border),0_0_14px_rgba(46,230,255,0.6)]'
+                    : status === 'overdue'
+                      ? 'bg-neon-pink text-border shadow-[4px_4px_0_var(--color-border),0_0_20px_rgba(255,46,143,0.7)]'
+                      : 'bg-panel text-ink-dim'
                 }`}
               >
-                {index + 1}
+                {status === 'done' ? (
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M5 12l4 4L19 6" />
+                  </svg>
+                ) : (
+                  String(index + 1).padStart(2, '0')
+                )}
               </div>
-              <span className="text-sm font-medium">{milestone.title}</span>
-              <span className="text-xs text-gray-500">{milestone.due_date}</span>
+              <span className="text-xs font-bold text-ink">{milestone.title}</span>
+              <span className="text-[10px] text-ink-dim">{milestone.due_date}</span>
             </div>
           );
         })}
       </div>
 
-      <div className="mt-6 border-t pt-4">
-        <h2 className="text-sm font-semibold">댓글 {comments.length}</h2>
-        {comments.length === 0 && <p className="mt-2 text-sm text-gray-500">아직 댓글이 없어요.</p>}
-        <ul className="mt-2 space-y-2">
+      <div className="mt-6 border-t-2 border-border pt-4">
+        <div className="flex items-center gap-1.5">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-ink-dim)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+          </svg>
+          <h2 className="text-xs font-bold text-ink">댓글 {comments.length}</h2>
+        </div>
+        {comments.length === 0 && <p className="mt-2 text-xs text-ink-dim">아직 댓글이 없어요.</p>}
+        <ul className="mt-2 flex flex-col gap-2">
           {comments.map((comment) => (
-            <li key={comment.id} className="flex items-center justify-between gap-2 rounded-lg bg-gray-50 p-2 text-sm">
-              <span>{comment.body}</span>
+            <li key={comment.id} className="flex items-start justify-between gap-2 rounded-lg border-2 border-border bg-panel p-2.5 text-xs">
+              <span className="text-ink">{comment.body}</span>
               {userId === comment.user_id && (
-                <button className="shrink-0 text-xs text-gray-400 hover:text-red-600" onClick={() => handleDeleteComment(comment.id)}>
-                  삭제
+                <button
+                  className="shrink-0 text-ink-dim"
+                  onClick={() => handleDeleteComment(comment.id)}
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M18 6 6 18" />
+                    <path d="M6 6l12 12" />
+                  </svg>
                 </button>
               )}
             </li>
           ))}
         </ul>
         {userId && (
-          <div className="mt-3 flex gap-2">
+          <div className="mt-3 flex gap-1.5">
             <input
-              className="flex-1 rounded-lg border p-2 text-sm"
+              className="min-w-0 flex-1 rounded-lg border-2 border-border bg-field p-2 text-xs text-ink"
               placeholder="댓글을 남겨보세요"
               value={commentBody}
               onChange={(e) => setCommentBody(e.target.value)}
             />
             <button
-              className="rounded-lg bg-orange-500 px-3 py-2 text-sm text-white disabled:opacity-50"
+              className="shrink-0 rounded-lg border-2 border-border bg-neon-pink px-3 py-2 text-xs font-bold text-border shadow-[2px_2px_0_var(--color-border)] disabled:opacity-50"
               onClick={handleAddComment}
               disabled={!commentBody.trim() || commentInFlight}
             >

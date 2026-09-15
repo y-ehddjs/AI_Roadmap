@@ -30,7 +30,7 @@ export default function MilestoneDetailPage() {
 
   if (notFound) {
     return (
-      <div className="mx-auto max-w-md p-6 text-center text-gray-600">
+      <div className="mx-auto max-w-md p-6 text-center text-ink-dim">
         찾을 수 없거나 접근 권한이 없는 마일스톤이에요.
       </div>
     );
@@ -55,8 +55,6 @@ export default function MilestoneDetailPage() {
   async function saveEdits() {
     if (!milestone) return;
     await updateMilestone(supabase, milestone.id, { description, due_date: dueDate });
-    // App Router는 뒤로 이동 시 이전 화면을 캐시에서 그대로 보여줄 수 있어서,
-    // 방금 바뀐 마감일/지연 상태가 안 보일 수 있다 - 뒤로 가기 전에 캐시를 무효화한다.
     router.refresh();
     router.back();
   }
@@ -66,37 +64,71 @@ export default function MilestoneDetailPage() {
     if (!confirm('이 마일스톤을 삭제할까요?')) return;
     const roadmapId = milestone.roadmap_id;
     await deleteMilestone(supabase, milestone.id);
-    // 미완료 마일스톤을 지워서 남은 마일스톤이 전부 완료 상태가 될 수도 있으니,
-    // 체크 완료 때와 마찬가지로 로드맵 자동 완료 여부를 다시 확인한다.
     await completeRoadmapIfAllDone(supabase, roadmapId);
     router.replace(`/roadmap/${roadmapId}`);
   }
 
+  const done = milestone.status === 'done';
+
   return (
-    <div className="mx-auto max-w-xl space-y-4 p-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold">{milestone.title}</h1>
-        <button className="text-sm text-red-600 underline" onClick={handleDelete}>
-          삭제
+    <div className="mx-auto max-w-xl space-y-5 p-6">
+      <div className="flex items-center justify-between gap-3">
+        <h1 className="text-sm font-bold text-ink">{milestone.title}</h1>
+        <button
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border-2 border-neon-red bg-panel shadow-[3px_3px_0_var(--color-border)]"
+          onClick={handleDelete}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-neon-red)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M3 6h18" />
+            <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+          </svg>
         </button>
       </div>
-      <label className="flex items-center gap-2">
-        <input type="checkbox" checked={milestone.status === 'done'} onChange={(e) => toggleDone(e.target.checked)} />
-        완료
-      </label>
-      <div>
-        <p className="mb-1 text-sm font-medium">메모</p>
+
+      <button
+        type="button"
+        className={`flex w-full items-center gap-3 rounded-2xl border-2 border-border p-4 shadow-[4px_4px_0_var(--color-border)] ${
+          done ? 'bg-neon-cyan/10' : 'bg-panel'
+        }`}
+        onClick={() => toggleDone(!done)}
+      >
+        <span
+          className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border-2 border-border ${
+            done ? 'bg-neon-cyan text-border shadow-[0_0_10px_rgba(46,230,255,0.6)]' : 'bg-field text-ink-dim'
+          }`}
+        >
+          {done && (
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M5 12l4 4L19 6" />
+            </svg>
+          )}
+        </span>
+        <span className="text-xs font-bold text-ink">완료로 표시</span>
+      </button>
+
+      <div className="flex flex-col gap-2">
+        <p className="text-[10px] font-bold text-ink-dim">메모</p>
         <textarea
-          className="w-full rounded-lg border p-3"
+          className="w-full rounded-lg border-2 border-border bg-field p-3 text-xs leading-relaxed text-ink"
+          rows={4}
           value={description}
           onChange={(e) => setDescription(e.target.value)}
         />
       </div>
-      <div>
-        <p className="mb-1 text-sm font-medium">마감일</p>
-        <input className="rounded-lg border p-3" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+      <div className="flex flex-col gap-2">
+        <p className="text-[10px] font-bold text-ink-dim">마감일</p>
+        <input
+          className="rounded-lg border-2 border-border bg-field p-3 text-xs text-ink"
+          type="date"
+          value={dueDate}
+          onChange={(e) => setDueDate(e.target.value)}
+        />
       </div>
-      <button className="rounded-lg bg-orange-500 px-4 py-3 font-semibold text-white" onClick={saveEdits}>
+      <button
+        className="w-full rounded-xl border-2 border-border bg-neon-pink p-3 font-display text-xs text-border shadow-[4px_4px_0_var(--color-border)]"
+        onClick={saveEdits}
+      >
         저장
       </button>
     </div>

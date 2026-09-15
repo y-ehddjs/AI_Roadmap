@@ -31,20 +31,20 @@ export default function CoachingInboxPage() {
 
   return (
     <div className="mx-auto max-w-2xl p-6">
-      <h1 className="text-xl font-bold">AI 코칭</h1>
-      {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
-      {loaded && messages.length === 0 && (
-        <p className="mt-4 text-sm text-gray-500">아직 코칭 메시지가 없어요.</p>
-      )}
-      <ul className="mt-4 space-y-2">
+      <h1 className="font-display text-sm text-neon-purple drop-shadow-[0_0_8px_rgba(185,139,255,0.5)]">AI 코칭</h1>
+      {error && <p className="mt-2 text-xs text-neon-pink">{error}</p>}
+      {loaded && messages.length === 0 && <p className="mt-4 text-xs text-ink-dim">아직 코칭 메시지가 없어요.</p>}
+      <ul className="mt-4 flex flex-col gap-2.5">
         {messages.map((item) => (
           <li key={item.id}>
             <button
-              className={`w-full rounded-xl border p-3 text-left ${item.read_at ? 'opacity-60' : ''}`}
+              className={`w-full rounded-xl border-2 p-3 text-left shadow-[3px_3px_0_var(--color-border)] ${
+                item.read_at ? 'border-border bg-panel opacity-60' : 'border-neon-purple bg-panel'
+              }`}
               onClick={() => handleOpen(item)}
             >
-              <p>{item.message}</p>
-              <p className="text-xs text-gray-500">
+              <p className="text-xs leading-relaxed text-ink">{item.message}</p>
+              <p className="mt-1.5 text-[10px] text-ink-dim">
                 {item.created_at} · {item.roadmap_title}
               </p>
             </button>

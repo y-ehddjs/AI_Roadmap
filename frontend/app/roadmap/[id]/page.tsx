@@ -96,7 +96,7 @@ export default function RoadmapDetailPage() {
 
   if (notFound) {
     return (
-      <div className="mx-auto max-w-md p-6 text-center text-gray-600">
+      <div className="mx-auto max-w-md p-6 text-center text-ink-dim">
         찾을 수 없거나 접근 권한이 없는 로드맵이에요.
       </div>
     );
@@ -109,69 +109,94 @@ export default function RoadmapDetailPage() {
 
   return (
     <div className="mx-auto max-w-2xl p-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold">{roadmap.title}</h1>
-        <button className="text-sm text-red-600 underline disabled:opacity-50" onClick={handleDeleteRoadmap} disabled={deleting}>
-          로드맵 삭제
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex flex-col items-center gap-1">
+          <h1 className="text-sm text-ink">{roadmap.title}</h1>
+          <span className="text-[9px] font-bold text-neon-purple">{roadmap.source === 'ai' ? 'AI 생성' : '직접 입력'}</span>
+        </div>
+        <button
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border-2 border-neon-red bg-panel shadow-[3px_3px_0_var(--color-border)] disabled:opacity-50"
+          onClick={handleDeleteRoadmap}
+          disabled={deleting}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-neon-red)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M3 6h18" />
+            <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+          </svg>
         </button>
       </div>
-      {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
-      <div className="mt-3 rounded-xl border p-3 text-sm">
+      {error && <p className="mt-2 text-xs text-neon-pink">{error}</p>}
+
+      <div className="mt-3 rounded-2xl border-2 border-border bg-panel p-3.5 shadow-[3px_3px_0_var(--color-border)] text-xs">
         {roadmap.is_public ? (
           <>
             <div className="flex items-center justify-between">
-              <span className="font-medium text-orange-700">커뮤니티에 게시물로 등록됨</span>
-              <button className="text-xs text-red-600 underline" onClick={() => handleTogglePublic(false)}>
+              <span className="font-bold text-neon-cyan">커뮤니티에 게시물로 등록됨</span>
+              <button className="text-[10px] text-ink-dim underline" onClick={() => handleTogglePublic(false)}>
                 등록 취소
               </button>
             </div>
-            <div className="mt-2 flex items-center gap-2">
+            <div className="mt-2 flex items-center gap-1.5">
               <input
                 ref={linkInputRef}
                 readOnly
                 value={`${typeof window !== 'undefined' ? window.location.origin : ''}/r/${id}`}
-                className="flex-1 rounded-lg border bg-gray-50 p-2 text-xs text-gray-600"
+                className="min-w-0 flex-1 rounded-md border-2 border-border bg-field p-1.5 text-[9px] text-ink-dim"
                 onFocus={(e) => e.target.select()}
               />
-              <button className="rounded-lg border px-3 py-2 text-xs" onClick={handleCopyLink}>
+              <button
+                className="shrink-0 rounded-md border-2 border-border bg-neon-cyan px-2.5 py-1.5 text-[9px] font-bold text-border shadow-[2px_2px_0_var(--color-border)]"
+                onClick={handleCopyLink}
+              >
                 {linkCopied ? '복사됨' : '복사'}
               </button>
             </div>
           </>
         ) : (
           <button
-            className="w-full rounded-lg bg-orange-500 py-2 font-semibold text-white"
+            className="w-full rounded-lg border-2 border-border bg-neon-pink py-2 font-bold text-border shadow-[3px_3px_0_var(--color-border)]"
             onClick={() => handleTogglePublic(true)}
           >
             커뮤니티에 게시물로 등록하기
           </button>
         )}
       </div>
-      <p className="text-sm text-gray-600">
-        전체 진행률 {progress.percent}% ({progress.completedCount}/{progress.totalCount})
-      </p>
 
-      <div className="mt-4 rounded-xl border p-4">
-        <p className="mb-2 text-sm font-medium">마일스톤 추가</p>
-        <div className="flex flex-col gap-2 sm:flex-row">
+      <div className="mt-3 rounded-2xl border-2 border-border bg-panel p-3.5 shadow-[4px_4px_0_var(--color-border)]">
+        <div className="flex justify-between text-[10px] text-ink-dim">
+          <span>전체 진행률</span>
+          <span className="font-bold text-neon-cyan">{progress.percent}%</span>
+        </div>
+        <div className="mt-1.5 h-2.5 overflow-hidden rounded-full border-2 border-border bg-field">
+          <div className="h-full bg-neon-cyan shadow-[0_0_8px_var(--color-neon-cyan)]" style={{ width: `${progress.percent}%` }} />
+        </div>
+        <span className="mt-1.5 block text-[9px] text-ink-dim">
+          {progress.totalCount}개 마일스톤 중 {progress.completedCount}개 완료
+        </span>
+      </div>
+
+      <div className="mt-3 rounded-2xl border-2 border-border bg-panel p-3.5 shadow-[3px_3px_0_var(--color-border)]">
+        <p className="mb-2 text-[10px] font-bold text-ink-dim">+ 마일스톤 추가</p>
+        <div className="flex flex-col gap-1.5 sm:flex-row">
           <input
-            className="flex-1 rounded-lg border p-3"
-            placeholder="마일스톤 제목"
+            className="min-w-0 flex-1 rounded-md border-2 border-border bg-field p-2 text-xs text-ink"
+            placeholder="제목"
             value={newMilestoneTitle}
             onChange={(e) => setNewMilestoneTitle(e.target.value)}
           />
           <input
-            className="rounded-lg border p-3"
+            className="rounded-md border-2 border-border bg-field p-2 text-xs text-ink sm:w-[110px]"
             type="date"
             value={newMilestoneDue}
             onChange={(e) => setNewMilestoneDue(e.target.value)}
           />
           <button
-            className="rounded-lg border px-4 py-2 disabled:opacity-50"
+            className="shrink-0 rounded-md border-2 border-border bg-neon-cyan px-3 py-2 text-xs font-bold text-border shadow-[2px_2px_0_var(--color-border)] disabled:opacity-50"
             onClick={handleAddMilestone}
             disabled={!newMilestoneTitle || !newMilestoneDue || addingMilestone}
           >
-            + 추가
+            추가
           </button>
         </div>
       </div>
@@ -181,9 +206,9 @@ export default function RoadmapDetailPage() {
           const status = milestoneStatus(milestone, now);
           return (
             <li key={milestone.id}>
-              <Link href={`/milestone/${milestone.id}`} className="block rounded-xl border p-3">
-                <p className="font-medium">{milestone.title}</p>
-                <p className={status === 'overdue' ? 'text-red-600' : 'text-gray-500'}>
+              <Link href={`/milestone/${milestone.id}`} className="block rounded-xl border-2 border-border bg-panel p-3 shadow-[3px_3px_0_var(--color-border)]">
+                <p className="text-xs font-bold text-ink">{milestone.title}</p>
+                <p className={`text-[10px] ${status === 'overdue' ? 'text-neon-red' : 'text-ink-dim'}`}>
                   {milestone.due_date} · {status}
                 </p>
               </Link>
@@ -192,7 +217,7 @@ export default function RoadmapDetailPage() {
         })}
       </ul>
 
-      <div className="relative mt-4 hidden sm:block" style={{ height: pathHeight }}>
+      <div className="relative mt-6 hidden sm:block" style={{ height: pathHeight }}>
         {milestones.map((milestone, index) => {
           const pos = positions[index];
           const status = milestoneStatus(milestone, now);
@@ -204,14 +229,24 @@ export default function RoadmapDetailPage() {
               style={{ left: `${pos.xPercent * 100}%`, top: pos.y }}
             >
               <div
-                className={`flex h-14 w-14 items-center justify-center rounded-full font-semibold text-white ${
-                  status === 'done' ? 'bg-green-500' : status === 'overdue' ? 'bg-red-500' : 'bg-gray-200 !text-gray-700'
+                className={`flex h-14 w-14 items-center justify-center rounded-full border-2 border-border font-display text-xs shadow-[3px_3px_0_var(--color-border)] ${
+                  status === 'done'
+                    ? 'bg-panel text-neon-cyan shadow-[3px_3px_0_var(--color-border),0_0_14px_rgba(46,230,255,0.6)]'
+                    : status === 'overdue'
+                      ? 'bg-neon-pink text-border shadow-[4px_4px_0_var(--color-border),0_0_20px_rgba(255,46,143,0.7)]'
+                      : 'bg-panel text-ink-dim'
                 }`}
               >
-                {index + 1}
+                {status === 'done' ? (
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M5 12l4 4L19 6" />
+                  </svg>
+                ) : (
+                  String(index + 1).padStart(2, '0')
+                )}
               </div>
-              <span className="text-sm font-medium">{milestone.title}</span>
-              <span className="text-xs text-gray-500">{milestone.due_date}</span>
+              <span className="text-xs font-bold text-ink">{milestone.title}</span>
+              <span className="text-[10px] text-ink-dim">{milestone.due_date}</span>
             </Link>
           );
         })}

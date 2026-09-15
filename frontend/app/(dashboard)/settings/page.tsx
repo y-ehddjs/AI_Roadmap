@@ -9,6 +9,26 @@ import type { NotificationSettings } from '../../../types/models';
 
 const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY as string;
 
+function Toggle({ checked, onChange }: { checked: boolean; onChange: (value: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={() => onChange(!checked)}
+      className={`relative h-6 w-11 shrink-0 rounded-full border-2 border-border transition-colors ${
+        checked ? 'bg-neon-cyan' : 'bg-field'
+      }`}
+    >
+      <span
+        className={`absolute top-0.5 h-4 w-4 rounded-full bg-panel transition-transform ${
+          checked ? 'translate-x-5' : 'translate-x-0.5'
+        }`}
+      />
+    </button>
+  );
+}
+
 export default function SettingsPage() {
   const userId = useRequireAuth();
   const router = useRouter();
@@ -92,48 +112,56 @@ export default function SettingsPage() {
   if (!loaded) return null;
 
   return (
-    <div className="mx-auto max-w-md space-y-4 p-6">
-      <h1 className="text-xl font-bold">설정</h1>
-      <label className="flex items-center gap-2">
-        <input type="checkbox" checked={reminderEnabled} onChange={(e) => toggleReminder(e.target.checked)} />
-        알림 받기
-      </label>
-      <div className="flex items-center gap-2">
-        <label className="text-sm text-gray-600" htmlFor="reminder-time">
-          알림 시간
-        </label>
-        <input
-          id="reminder-time"
-          type="time"
-          className="rounded-lg border p-2"
-          value={reminderTime}
-          disabled={!reminderEnabled}
-          onChange={(e) => handleReminderTimeChange(e.target.value)}
-        />
+    <div className="mx-auto max-w-md space-y-3 p-6">
+      <h1 className="font-display text-sm text-neon-cyan drop-shadow-[0_0_8px_rgba(46,230,255,0.5)]">설정</h1>
+
+      <div className="flex flex-col gap-3 rounded-2xl border-2 border-border bg-panel p-4 shadow-[4px_4px_0_var(--color-border)]">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-bold text-ink">알림 받기</span>
+          <Toggle checked={reminderEnabled} onChange={toggleReminder} />
+        </div>
+        <div className="flex items-center justify-between">
+          <label className="text-xs text-ink-dim" htmlFor="reminder-time">
+            알림 시간
+          </label>
+          <input
+            id="reminder-time"
+            type="time"
+            className="rounded-md border-2 border-border bg-field p-1.5 text-xs text-ink disabled:opacity-50"
+            value={reminderTime}
+            disabled={!reminderEnabled}
+            onChange={(e) => handleReminderTimeChange(e.target.value)}
+          />
+        </div>
       </div>
-      <div className="flex flex-col gap-2">
-        <label className="text-sm text-gray-600" htmlFor="display-name">
-          닉네임 (리더보드/공개 화면에 표시)
-        </label>
-        <input
-          id="display-name"
-          className="rounded-lg border p-2"
-          value={displayName}
-          onChange={(e) => handleDisplayNameChange(e.target.value)}
-        />
+
+      <div className="flex flex-col gap-3 rounded-2xl border-2 border-border bg-panel p-4 shadow-[4px_4px_0_var(--color-border)]">
+        <div className="flex flex-col gap-1.5">
+          <label className="text-[10px] font-bold text-ink-dim" htmlFor="display-name">
+            닉네임 (리더보드/공개 화면에 표시)
+          </label>
+          <input
+            id="display-name"
+            className="rounded-lg border-2 border-border bg-field p-2 text-xs text-ink"
+            value={displayName}
+            onChange={(e) => handleDisplayNameChange(e.target.value)}
+          />
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-bold text-ink">리더보드에 표시</span>
+          <Toggle checked={showOnLeaderboard} onChange={handleShowOnLeaderboardChange} />
+        </div>
       </div>
-      <label className="flex items-center gap-2">
-        <input
-          type="checkbox"
-          checked={showOnLeaderboard}
-          onChange={(e) => handleShowOnLeaderboardChange(e.target.checked)}
-        />
-        리더보드에 표시
-      </label>
-      {email && <p className="text-sm text-gray-500">{email}</p>}
-      <button className="rounded-lg border px-4 py-2" onClick={handleLogout}>
-        로그아웃
-      </button>
+
+      <div className="flex flex-col gap-3 rounded-2xl border-2 border-border bg-panel p-4 shadow-[4px_4px_0_var(--color-border)]">
+        {email && <p className="text-xs text-ink-dim">{email}</p>}
+        <button
+          className="rounded-lg border-2 border-neon-red bg-panel py-2 text-xs font-bold text-neon-red"
+          onClick={handleLogout}
+        >
+          로그아웃
+        </button>
+      </div>
     </div>
   );
 }

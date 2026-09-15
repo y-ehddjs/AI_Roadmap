@@ -110,7 +110,7 @@
 |---|---|---|---|---|---|
 | GET | `/rest/v1/comments?select=*&roadmap_id=eq.{roadmapId}&order=created_at.asc` | `listComments` | 없음 | `Comment[]` | 200 |
 | POST | `/rest/v1/comments` (`Prefer: return=representation`) | `addComment` | `{ roadmap_id, user_id, body }` | `Comment` 단일 행 | 201 |
-| DELETE | `/rest/v1/comments?id=eq.{commentId}` | `deleteComment` — lib 함수는 있으나 화면에서는 아직 호출하지 않음(삭제 UI 미구현) | 없음 | 없음 | 204 |
+| DELETE | `/rest/v1/comments?id=eq.{commentId}` | `deleteComment` — 공개 로드맵 보기 화면에서 내가 쓴 댓글에만 "삭제" 버튼 노출 | 없음 | 없음 | 204 |
 
 ## 10. 팔로우 (`lib/follows.ts`, `follows` 테이블)
 

@@ -9,7 +9,7 @@ import { computeNodePositions } from '../../../lib/timeline';
 import { hasReacted, getReactionCount, toggleReaction } from '../../../lib/reactions';
 import { getProfile } from '../../../lib/profiles';
 import { isFollowing, follow, unfollow } from '../../../lib/follows';
-import { listComments, addComment } from '../../../lib/comments';
+import { listComments, addComment, deleteComment } from '../../../lib/comments';
 import type { Roadmap, Milestone, Comment } from '../../../types/models';
 
 type PublicRoadmap = Pick<Roadmap, 'id' | 'title' | 'user_id'>;
@@ -79,6 +79,11 @@ export default function PublicRoadmapPage() {
     const created = await addComment(supabase, roadmap.id, userId, commentBody.trim());
     setComments((prev) => [...prev, created]);
     setCommentBody('');
+  }
+
+  async function handleDeleteComment(commentId: string) {
+    await deleteComment(supabase, commentId);
+    setComments((prev) => prev.filter((c) => c.id !== commentId));
   }
 
   if (notFound) {
@@ -156,8 +161,13 @@ export default function PublicRoadmapPage() {
         <h2 className="text-sm font-semibold">댓글 {comments.length}</h2>
         <ul className="mt-2 space-y-2">
           {comments.map((comment) => (
-            <li key={comment.id} className="rounded-lg bg-gray-50 p-2 text-sm">
-              {comment.body}
+            <li key={comment.id} className="flex items-center justify-between gap-2 rounded-lg bg-gray-50 p-2 text-sm">
+              <span>{comment.body}</span>
+              {userId === comment.user_id && (
+                <button className="shrink-0 text-xs text-gray-400 hover:text-red-600" onClick={() => handleDeleteComment(comment.id)}>
+                  삭제
+                </button>
+              )}
             </li>
           ))}
         </ul>

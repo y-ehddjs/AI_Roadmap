@@ -1,7 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { calculateProgress } from './progress';
 import { listFollowedUserIds } from './follows';
-import type { MilestoneStatus } from '../types/models';
 
 export interface LeaderboardEntry {
   displayName: string;
@@ -35,14 +34,11 @@ async function computeUserStats(
     .in('roadmap_id', roadmapIds);
   if (milestonesError) throw milestonesError;
 
-  const milestonesByRoadmap = new Map<string, { status: MilestoneStatus }[]>();
-  for (const m of (milestones ?? []) as { roadmap_id: string; status: MilestoneStatus }[]) {
-    const list = milestonesByRoadmap.get(m.roadmap_id) ?? [];
-    list.push({ status: m.status });
-    milestonesByRoadmap.set(m.roadmap_id, list);
-  }
-  const percents = roadmapIds.map((id) => calculateProgress(milestonesByRoadmap.get(id) ?? []).percent);
-  const progressPercent = Math.round(percents.reduce((sum, p) => sum + p, 0) / percents.length);
+  // lib/dashboard.ts의 summarizeDashboard와 같은 방식(마일스톤 개수 가중 평균)으로
+  // 계산한다 — 로드맵별 퍼센트를 단순 평균하면 마일스톤 1개짜리 로드맵이 20개짜리
+  // 로드맵과 똑같은 비중을 갖게 되어, 같은 사용자의 대시보드 "전체 진행률"과
+  // 리더보드 진행률이 서로 다른 숫자를 보여줄 수 있었다.
+  const progressPercent = calculateProgress((milestones ?? []) as { status: 'pending' | 'done' | 'overdue' }[]).percent;
 
   return { heartCount: heartCount ?? 0, progressPercent };
 }

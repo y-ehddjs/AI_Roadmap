@@ -128,7 +128,7 @@ RLS: `follows`는 팔로우한 사람(`follower`) 본인만 자기 팔로우 목
 ## 11. 리더보드 (`lib/leaderboard.ts` — `follows`/`profiles`/`roadmaps`/`roadmap_reactions`/`milestones` 복합 조회)
 
 전체 공개 순위가 아니라 "나 + 내가 팔로우한 사람" 안에서만 경쟁하며, 순위는
-"받은 하트 총합 + 평균 진행률(%)"을 단순 합산한 점수로 정렬한다. `getLeaderboard(client, viewerUserId)` 호출 시:
+"받은 하트 총합 + 진행률(%)"을 단순 합산한 점수로 정렬한다. `getLeaderboard(client, viewerUserId)` 호출 시:
 
 | 단계 | 메서드 | 경로 | 용도 | 응답 |
 |---|---|---|---|---|
@@ -136,7 +136,7 @@ RLS: `follows`는 팔로우한 사람(`follower`) 본인만 자기 팔로우 목
 | 2 | GET | `/rest/v1/profiles?select=user_id,display_name&user_id=in.({viewerUserId, ...followedIds})&show_on_leaderboard=eq.true` | 대상(나+팔로우한 사람) 중 리더보드 표시를 켠 사람만 | `{ user_id, display_name }[]` |
 | 3a | GET | `/rest/v1/roadmaps?select=id&user_id=eq.{targetUserId}&is_public=eq.true` | (대상자별로 반복) 공개 로드맵 id 목록 | `{ id }[]` |
 | 3b | HEAD | `/rest/v1/roadmap_reactions?select=id&roadmap_id=in.({roadmapIds})` (`count=exact`) | 받은 하트 총합 | (Content-Range) |
-| 3c | GET | `/rest/v1/milestones?select=roadmap_id,status&roadmap_id=in.({roadmapIds})` | 로드맵별 진행률 계산 후 평균 | `{ roadmap_id, status }[]` |
+| 3c | GET | `/rest/v1/milestones?select=roadmap_id,status&roadmap_id=in.({roadmapIds})` | 진행률 계산용 — 마일스톤 개수로 가중 평균(총 완료 수/총 마일스톤 수)을 내어 `lib/dashboard.ts`의 대시보드 "전체 진행률"과 같은 방식으로 계산한다(로드맵별 퍼센트를 단순 평균하지 않음 — 마일스톤 1개짜리 로드맵이 20개짜리와 같은 비중을 갖는 왜곡을 피하기 위함) | `{ roadmap_id, status }[]` |
 
 `roadmaps`/`profiles`는 서로 직접 FK로 안 묶여 있어 PostgREST가 자동 조인을 못
 해준다 — `user_id`를 키 삼아 여러 번 나눠 조회한 뒤 클라이언트에서 직접 합친다.

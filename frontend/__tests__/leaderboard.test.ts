@@ -25,6 +25,36 @@ test('ranks followed users (and self) by hearts + progress, highest first', asyn
   ]);
 });
 
+test('progressPercent is milestone-count-weighted across roadmaps, not a per-roadmap average', async () => {
+  // 1개 로드맵(마일스톤 1개, 완료)과 9개 로드맵(마일스톤 9개, 전부 미완료)을 가진
+  // 사용자: 로드맵별 퍼센트를 그냥 평균내면 (100%+0%)/2=50%가 되지만, 실제로는
+  // 완료한 마일스톤이 10개 중 1개뿐이므로 10%가 맞다 (lib/dashboard.ts의
+  // summarizeDashboard와 같은 마일스톤 개수 가중 평균).
+  const client = makeFakeClient([
+    { data: [], error: null }, // 팔로우 없음
+    { data: [{ user_id: 'u1', display_name: '동언' }], error: null },
+    { data: [{ id: 'r1' }, { id: 'r2' }], error: null }, // u1의 공개 로드맵 2개
+    { data: null, error: null, count: 0 }, // 하트 없음
+    {
+      data: [
+        { roadmap_id: 'r1', status: 'done' },
+        { roadmap_id: 'r2', status: 'pending' },
+        { roadmap_id: 'r2', status: 'pending' },
+        { roadmap_id: 'r2', status: 'pending' },
+        { roadmap_id: 'r2', status: 'pending' },
+        { roadmap_id: 'r2', status: 'pending' },
+        { roadmap_id: 'r2', status: 'pending' },
+        { roadmap_id: 'r2', status: 'pending' },
+        { roadmap_id: 'r2', status: 'pending' },
+        { roadmap_id: 'r2', status: 'pending' },
+      ],
+      error: null,
+    },
+  ]);
+  const result = await getLeaderboard(client, 'u1');
+  expect(result).toEqual([{ displayName: '동언', heartCount: 0, progressPercent: 10, score: 10 }]);
+});
+
 test('returns an empty array when nobody (self or followed) opted into the leaderboard', async () => {
   const client = makeFakeClient([
     { data: [], error: null }, // 팔로우 없음

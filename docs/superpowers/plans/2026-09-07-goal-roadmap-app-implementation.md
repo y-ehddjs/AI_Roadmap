@@ -5061,3 +5061,35 @@ git add supabase/migrations/0003_hearts_comments_follows.sql types/models.ts \
   app/r/\[id\]/page.tsx app/\(dashboard\)/leaderboard/page.tsx app/\(dashboard\)/community/page.tsx
 git commit -m "feat: replace milestone high-fives with roadmap-level hearts, add comments and follow-gated leaderboard"
 ```
+
+### Task 28: 리더보드를 커뮤니티 탭으로 통합 (강사 피드백 — 하단 네비 항목 축소)
+
+강사 피드백에서 "하단 바에 너무 많은 항목이 들어가있다"는 지적에 따라, 독립 탭이던
+리더보드를 커뮤니티 화면 안의 서브뷰(상단 "피드"/"리더보드" 토글)로 흡수한다.
+Task 27에서 리더보드 랭킹 로직을 팔로우 기반으로 바꾸면서, 어차피 "같은 소셜 그래프
+기능"이라는 성격이 강해졌기 때문에 자연스러운 통합.
+
+**Files:**
+- Modify: `app/(dashboard)/layout.tsx` — 하단 네비게이션에서 `<Link href="/leaderboard">리더보드</Link>` 제거 (6개 탭 → 5개 탭: 홈/대시보드/AI 코칭/커뮤니티/설정)
+- Delete: `app/(dashboard)/leaderboard/page.tsx` — 독립 라우트 폐기
+- Modify: `app/(dashboard)/community/page.tsx` — 상단에 `view` state(`'feed' | 'leaderboard'`)로 전환하는 탭 2개 추가.
+  `view === 'feed'`일 때 기존 피드(오늘 하트순/추천순 + 검색 + 목록)를 그대로 보여주고,
+  `view === 'leaderboard'`일 때 `lib/leaderboard.ts`의 `getLeaderboard(supabase, userId)`를
+  호출해 같은 페이지 안에서 순위 목록을 렌더링한다. `lib/leaderboard.ts`/`lib/community.ts`
+  자체는 변경 없음 — UI 레이어만 한 페이지로 합친 것.
+
+**검증:**
+- `npx tsc --noEmit` — 타입 에러 없음
+- `npx jest` — 17 suites / 73 tests 전부 통과 (lib 레벨 테스트만 존재하고 페이지 컴포넌트
+  테스트는 원래 없어서 영향 없음)
+- `npm run dev`로 `/community` GET 200, `/leaderboard` GET 404(라우트 삭제 확인) 확인,
+  렌더된 HTML에 "피드"/"리더보드"/"커뮤니티" 텍스트가 모두 존재하는지 확인
+  (로그인이 필요한 상태 데이터까지의 실제 브라우저 클릭 테스트는 별도로 필요)
+
+- [ ] **Step: 커밋**
+
+```bash
+git add "app/(dashboard)/layout.tsx" "app/(dashboard)/community/page.tsx"
+git add -u "app/(dashboard)/leaderboard"
+git commit -m "feat: merge leaderboard into community page as a feed/leaderboard tab toggle"
+```

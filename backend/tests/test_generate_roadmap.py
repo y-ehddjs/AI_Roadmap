@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from app.generate_roadmap_parse import parse_roadmap_response
@@ -29,3 +31,19 @@ def test_sorts_milestones_by_due_date_before_assigning_order_index():
         ("1km 완주", "2026-10-01", 0),
         ("3km 완주", "2026-10-15", 1),
     ]
+
+
+def test_raises_when_the_response_is_an_empty_array():
+    with pytest.raises(ValueError, match="at least one milestone"):
+        parse_roadmap_response("[]")
+
+
+def test_raises_when_a_due_date_is_not_a_real_iso_date():
+    with pytest.raises(ValueError, match="not a valid date"):
+        parse_roadmap_response('[{"title": "1km 완주", "due_date": "다음 주"}]')
+
+
+def test_raises_when_there_are_too_many_milestones():
+    raw = json.dumps([{"title": f"마일스톤 {i}", "due_date": "2026-10-01"} for i in range(21)])
+    with pytest.raises(ValueError, match="too many milestones"):
+        parse_roadmap_response(raw)

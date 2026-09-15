@@ -12,9 +12,9 @@ export async function listMessages(client: SupabaseClient, userId: string): Prom
     .eq('user_id', userId)
     .order('created_at', { ascending: false });
   if (error) throw error;
-  return (data ?? []).map((row: any) => {
+  return (data ?? []).map((row: CoachingMessage & { roadmaps: { title: string } | null }) => {
     const { roadmaps, ...rest } = row;
-    return { ...rest, roadmap_title: roadmaps?.title ?? '' } as CoachingMessageWithRoadmap;
+    return { ...rest, roadmap_title: roadmaps?.title ?? '' };
   });
 }
 

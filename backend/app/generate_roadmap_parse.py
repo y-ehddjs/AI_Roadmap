@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import date
+
+MAX_MILESTONES = 20
 
 
 @dataclass
@@ -18,6 +21,10 @@ def parse_roadmap_response(raw_text: str) -> list[ParsedMilestone]:
         raise ValueError("AI response was not valid JSON") from exc
     if not isinstance(data, list):
         raise ValueError("AI response must be a JSON array of milestones")
+    if len(data) == 0:
+        raise ValueError("AI response must contain at least one milestone")
+    if len(data) > MAX_MILESTONES:
+        raise ValueError(f"AI response has too many milestones (max {MAX_MILESTONES})")
 
     without_order: list[dict] = []
     for index, item in enumerate(data):
@@ -25,6 +32,10 @@ def parse_roadmap_response(raw_text: str) -> list[ParsedMilestone]:
         due_date = item.get("due_date") if isinstance(item, dict) else None
         if not isinstance(title, str) or not isinstance(due_date, str):
             raise ValueError(f"Milestone at index {index} is missing title or due_date")
+        try:
+            date.fromisoformat(due_date)
+        except ValueError as exc:
+            raise ValueError(f"Milestone at index {index} has a due_date that is not a valid date") from exc
         without_order.append({"title": title, "due_date": due_date})
 
     # 모델이 마일스톤을 항상 날짜순으로 돌려준다는 보장이 없어서, order_index를

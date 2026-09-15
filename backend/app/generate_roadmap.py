@@ -5,7 +5,7 @@ from datetime import date
 
 import httpx
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from supabase import create_client
 
 from .generate_roadmap_parse import parse_roadmap_response
@@ -17,8 +17,8 @@ router = APIRouter()
 
 class GenerateRoadmapRequest(BaseModel):
     user_id: str
-    title: str
-    description: str | None = None
+    title: str = Field(min_length=1, max_length=200)
+    description: str | None = Field(default=None, max_length=2000)
 
 
 class GenerateRoadmapResponse(BaseModel):
@@ -41,7 +41,7 @@ async def generate_roadmap(payload: GenerateRoadmapRequest) -> GenerateRoadmapRe
         "구성된 JSON 배열로만 응답해. 다른 설명 텍스트는 포함하지 마."
     )
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=30.0) as client:
         ai_response = await client.post(
             f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent",
             params={"key": gemini_api_key},
@@ -55,9 +55,13 @@ async def generate_roadmap(payload: GenerateRoadmapRequest) -> GenerateRoadmapRe
         raise HTTPException(status_code=502, detail="AI request failed")
 
     ai_json = ai_response.json()
-    raw_text = (
-        ai_json.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
-    )
+    # Gemini가 안전 필터 등으로 응답을 막으면 "candidates" 키는 있되 빈 리스트로
+    # 온다 - `.get("candidates", [{}])`는 키가 "존재"할 때는 기본값을 안 쓰므로
+    # `[][0]`에서 그대로 IndexError(502 대신 500)가 난다.
+    candidates = ai_json.get("candidates") or [{}]
+    if not candidates or not candidates[0].get("content"):
+        raise HTTPException(status_code=502, detail="AI response was empty or blocked")
+    raw_text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
 
     try:
         milestones = parse_roadmap_response(raw_text)

@@ -1,10 +1,22 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from datetime import date
 
 MAX_MILESTONES = 20
+
+# Gemini는 "다른 설명 텍스트는 포함하지 마"라고 프롬프트에 지시해도 응답을
+# ```json ... ``` (또는 태그 없는 ``` ... ```) 코드 펜스로 감싸는 경우가 실제
+# 호출로 확인될 만큼 흔하다 - 모델 입장에서는 펜스가 "설명 텍스트"가 아니라
+# 포맷팅이라 지시를 어긴 게 아니다. json.loads 이전에 벗겨낸다.
+_CODE_FENCE_RE = re.compile(r"^```(?:json)?\s*\n?(.*?)\n?```$", re.DOTALL)
+
+
+def _strip_code_fence(raw_text: str) -> str:
+    match = _CODE_FENCE_RE.match(raw_text.strip())
+    return match.group(1) if match else raw_text
 
 
 @dataclass
@@ -16,7 +28,7 @@ class ParsedMilestone:
 
 def parse_roadmap_response(raw_text: str) -> list[ParsedMilestone]:
     try:
-        data = json.loads(raw_text)
+        data = json.loads(_strip_code_fence(raw_text))
     except json.JSONDecodeError as exc:
         raise ValueError("AI response was not valid JSON") from exc
     if not isinstance(data, list):

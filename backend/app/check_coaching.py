@@ -68,7 +68,10 @@ async def run_check_coaching() -> int:
                     params={"key": gemini_api_key},
                     json={
                         "contents": [{"parts": [{"text": build_coaching_prompt(milestone)}]}],
-                        "generationConfig": {"maxOutputTokens": 256},
+                        # generate_roadmap.py와 같은 이유로 확장 사고를 끈다 - 256
+                        # 토큰 예산으로는 "생각" 토큰만으로도 다 소진되어 실제 코칭
+                        # 메시지가 매번 빈 텍스트(기본 문구로 대체)가 되기 쉽다.
+                        "generationConfig": {"maxOutputTokens": 256, "thinkingConfig": {"thinkingBudget": 0}},
                     },
                 )
                 if ai_response.status_code != 200:

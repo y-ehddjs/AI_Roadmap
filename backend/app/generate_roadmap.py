@@ -47,7 +47,11 @@ async def generate_roadmap(payload: GenerateRoadmapRequest) -> GenerateRoadmapRe
             params={"key": gemini_api_key},
             json={
                 "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {"maxOutputTokens": 1024},
+                # gemini-2.5-flash는 기본적으로 "생각" 토큰을 쓰는데, 이게 같은
+                # maxOutputTokens 예산을 나눠 써서 실제 답변이 나오기 전에 토큰이
+                # 바닥나 MAX_TOKENS로 잘린 응답이 나오는 걸 실제 호출로 확인했다
+                # (단순 JSON 생성에는 확장 사고가 필요 없으므로 꺼둔다).
+                "generationConfig": {"maxOutputTokens": 2048, "thinkingConfig": {"thinkingBudget": 0}},
             },
         )
 

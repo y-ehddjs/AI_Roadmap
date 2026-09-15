@@ -47,3 +47,17 @@ def test_raises_when_there_are_too_many_milestones():
     raw = json.dumps([{"title": f"마일스톤 {i}", "due_date": "2026-10-01"} for i in range(21)])
     with pytest.raises(ValueError, match="too many milestones"):
         parse_roadmap_response(raw)
+
+
+def test_parses_a_response_wrapped_in_a_markdown_json_code_fence():
+    # Gemini는 "다른 설명 텍스트는 포함하지 마"라고 지시해도 ```json ... ``` 코드
+    # 펜스로 감싸서 응답하는 경우가 실제로 흔하다(실제 API 호출로 확인됨).
+    raw = '```json\n[{"title": "1km 완주", "due_date": "2026-10-01"}]\n```'
+    result = parse_roadmap_response(raw)
+    assert [(m.title, m.due_date) for m in result] == [("1km 완주", "2026-10-01")]
+
+
+def test_parses_a_response_wrapped_in_a_bare_code_fence_without_the_json_tag():
+    raw = '```\n[{"title": "1km 완주", "due_date": "2026-10-01"}]\n```'
+    result = parse_roadmap_response(raw)
+    assert [(m.title, m.due_date) for m in result] == [("1km 완주", "2026-10-01")]

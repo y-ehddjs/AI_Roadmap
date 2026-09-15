@@ -19,6 +19,9 @@ export default function RoadmapDetailPage() {
   const [newMilestoneTitle, setNewMilestoneTitle] = useState('');
   const [newMilestoneDue, setNewMilestoneDue] = useState('');
   const [addingMilestone, setAddingMilestone] = useState(false);
+  const [notFound, setNotFound] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function load() {
     if (!id) return;
@@ -28,7 +31,7 @@ export default function RoadmapDetailPage() {
 
   useEffect(() => {
     if (!userId || !id) return;
-    load();
+    load().catch(() => setNotFound(true));
   }, [userId, id]);
 
   async function handleAddMilestone() {
@@ -57,10 +60,16 @@ export default function RoadmapDetailPage() {
   }
 
   async function handleDeleteRoadmap() {
-    if (!id) return;
+    if (!id || deleting) return;
     if (!confirm('이 로드맵과 모든 마일스톤을 삭제할까요? 되돌릴 수 없어요.')) return;
-    await deleteRoadmap(supabase, id);
-    router.replace('/');
+    setDeleting(true);
+    try {
+      await deleteRoadmap(supabase, id);
+      router.replace('/');
+    } catch {
+      setError('로드맵 삭제에 실패했어요. 다시 시도해주세요.');
+      setDeleting(false);
+    }
   }
 
   const [linkCopied, setLinkCopied] = useState(false);
@@ -85,6 +94,13 @@ export default function RoadmapDetailPage() {
     }
   }
 
+  if (notFound) {
+    return (
+      <div className="mx-auto max-w-md p-6 text-center text-gray-600">
+        찾을 수 없거나 접근 권한이 없는 로드맵이에요.
+      </div>
+    );
+  }
   if (!roadmap) return null;
   const progress = calculateProgress(milestones);
   const now = new Date();
@@ -95,10 +111,11 @@ export default function RoadmapDetailPage() {
     <div className="mx-auto max-w-2xl p-6">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold">{roadmap.title}</h1>
-        <button className="text-sm text-red-600 underline" onClick={handleDeleteRoadmap}>
+        <button className="text-sm text-red-600 underline disabled:opacity-50" onClick={handleDeleteRoadmap} disabled={deleting}>
           로드맵 삭제
         </button>
       </div>
+      {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
       <div className="mt-3 rounded-xl border p-3 text-sm">
         {roadmap.is_public ? (
           <>

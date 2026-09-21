@@ -109,6 +109,45 @@ docker build \
 docker run -p 3000:3000 goal-roadmap-frontend
 ```
 
+### docker-compose (전체 스택)
+
+`docker-compose.yml`이 저장소 루트에 있고 `backend`, `frontend` 두 서비스를 함께 띄운다.
+`NEXT_PUBLIC_*` 빌드 인자 보간에 `frontend/.env.local` 값을 쓰므로 `--env-file`을 지정한다.
+
+```bash
+docker compose --env-file frontend/.env.local up --build
+# 종료: docker compose --env-file frontend/.env.local down
+```
+
+컨테이너 간 네트워킹은 개별 `docker run`과 다르다 — 두 서비스가 같은 compose
+네트워크에 있어서 서로를 서비스 이름(`backend`)으로 부를 수 있고, 로컬 Supabase는
+여전히 컨테이너 바깥(호스트)에 떠 있다. 그래서 `docker-compose.yml`이
+`backend/.env` / `frontend/.env.local`의 일부 값을 `environment:`로 오버라이드한다:
+
+| 변수 | `.env` 값 (로컬/비-Docker 개발용) | compose 오버라이드 | 이유 |
+|---|---|---|---|
+| `SUPABASE_URL` (backend) | `http://127.0.0.1:54321` | `http://host.docker.internal:54321` | 컨테이너 안의 `127.0.0.1`은 컨테이너 자신을 가리킴 |
+| `BACKEND_URL` (frontend, server-side) | `http://localhost:8000` | `http://backend:8000` | `/api/check-coaching`이 frontend 컨테이너 안에서 실행되므로 자기 자신이 아니라 backend 서비스를 가리켜야 함 |
+| `NEXT_PUBLIC_*` | 그대로 사용 | (오버라이드 없음) | 브라우저(호스트)에서 직접 실행되는 코드라 `localhost`/`127.0.0.1`로도 문제없음 |
+
+backend의 `./backend/data`를 `/app/data`로 바인드 마운트해뒀다 — 지금은 SQLite를
+쓰지 않아 아무것도 쓰지 않지만, 나중에 로컬 파일 DB를 추가하면 `docker compose down`
+후 재생성해도 데이터가 남도록 이 경로 밑에 두면 된다. 실제 앱 데이터(로드맵,
+커뮤니티 게시물 등)는 이 볼륨과 무관하게 로컬 Supabase(호스트에서 별도로 띄운
+Postgres 컨테이너들)에 저장되고, 거기서 자체 볼륨으로 영속된다.
+
+**배포 확인 체크리스트**
+
+- [ ] **환경변수**: `backend/.env`, `frontend/.env.local`이 실제 값으로 채워져 있는가 (`*.env.example` 기준으로 diff)
+- [ ] **환경변수(컨테이너 간)**: `SUPABASE_URL`(backend), `BACKEND_URL`(frontend)이 위 표대로 compose 안에서 오버라이드됐는가 — `docker compose exec backend printenv SUPABASE_URL` / `docker compose exec frontend printenv BACKEND_URL`로 확인
+- [ ] **포트**: 8000(backend), 3000(frontend)이 호스트에서 이미 사용 중이 아닌가 (`lsof -i :8000`, `lsof -i :3000`)
+- [ ] **로컬 Supabase 기동 여부**: `docker ps --filter name=supabase`로 전체 스택(db/auth/rest/storage 등)이 healthy인지 확인 — 안 떠 있으면 backend/frontend가 죽지 않아도 데이터 관련 기능이 전부 실패한다
+- [ ] **볼륨**: `./backend/data:/app/data`가 마운트됐는가 (`docker compose config`에서 `volumes` 확인). 앱이 실제로 이 경로에 파일을 쓰는 기능을 추가했다면 `docker compose down && up`으로 파일이 남는지 재확인
+- [ ] **데이터 영속성(Supabase 쪽)**: 컨테이너를 내렸다 올려도 Supabase에 저장된 데이터(로드맵/커뮤니티 게시물 등)가 남아있는가 — 이건 우리 볼륨이 아니라 Supabase 자체 컨테이너의 영속성이므로 별도로 확인 필요
+- [ ] **컨테이너 간 통신**: frontend → backend(`http://backend:8000`), backend → Supabase(`http://host.docker.internal:54321`) 둘 다 실제로 붙는지 `docker compose exec`로 직접 호출해 확인
+- [ ] **헬스체크**: `curl localhost:8000/docs` (200), `curl localhost:3000/` (200)
+- [ ] **브라우저 동작**: 로그인/회원가입, 로드맵 생성, 커뮤니티 피드 조회가 실제 브라우저에서 에러 없이 동작하는가
+
 ## 테스트
 
 ```bash

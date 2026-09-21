@@ -56,7 +56,7 @@ def health() -> dict[str, str]:
 
 @app.post("/internal/check-coaching", dependencies=[Depends(require_internal_secret)])
 async def trigger_check_coaching() -> dict[str, int]:
-    processed = await run_check_coaching()
+    processed = await run_check_coaching(manual=True)
     return {"processed": processed}
 
 

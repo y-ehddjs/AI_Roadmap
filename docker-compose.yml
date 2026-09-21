@@ -1,0 +1,36 @@
+services:
+  backend:
+    build: ./backend
+    env_file: backend/.env
+    environment:
+      # backend/.env has SUPABASE_URL=http://127.0.0.1:54321 for local (non-Docker) dev,
+      # where 127.0.0.1 is the host. Inside this container that would resolve to the
+      # container itself, so route it to the host-run Supabase stack instead.
+      SUPABASE_URL: http://host.docker.internal:54321
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/data:/app/data
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+        NEXT_PUBLIC_VAPID_PUBLIC_KEY: ${NEXT_PUBLIC_VAPID_PUBLIC_KEY}
+        NEXT_PUBLIC_BACKEND_URL: ${NEXT_PUBLIC_BACKEND_URL}
+    env_file: frontend/.env.local
+    environment:
+      # frontend/.env.local has BACKEND_URL=http://localhost:8000 for local (non-Docker)
+      # dev. This var is read server-side (app/api/check-coaching), so inside this
+      # container it must point at the backend service, not back at itself.
+      BACKEND_URL: http://backend:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    restart: unless-stopped
